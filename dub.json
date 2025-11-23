@@ -1,0 +1,105 @@
+{
+    "name": "aurora",
+    "description": "High-performance HTTP/1.1 backend framework for D",
+    "authors": [
+        "Federico Filippi"
+    ],
+    "copyright": "Copyright © 2025, Federico Filippi",
+    "license": "MIT",
+    "targetType": "library",
+    "dependencies": {
+        "vibe-core": "~>2.8.6",
+        "eventcore": "~>0.9.0",
+        "mir-algorithm": "~>3.22.0",
+        "unit-threaded": "~>2.1.9",
+        "wire": {
+            "path": "../Wire"
+        }
+    },
+    "preBuildCommands": [
+        "cd ../Wire && make lib"
+    ],
+    "configurations": [
+        {
+            "name": "library",
+            "targetType": "library"
+        },
+        {
+            "name": "unittest",
+            "targetType": "executable",
+            "dependencies": {
+                "unit-threaded": "~>2.1.0"
+            },
+            "sourceFiles": [
+                "tests/runner.d"
+            ],
+            "importPaths": [
+                "source",
+                "tests"
+            ],
+            "sourcePaths": [
+                "source",
+                "tests"
+            ],
+            "mainSourceFile": "tests/runner.d",
+            "dflags": [
+                "-unittest"
+            ]
+        },
+        {
+            "name": "unittest-cov",
+            "targetType": "executable",
+            "dependencies": {
+                "unit-threaded": "~>2.1.0"
+            },
+            "sourceFiles": [
+                "tests/runner.d"
+            ],
+            "importPaths": [
+                "source",
+                "tests"
+            ],
+            "sourcePaths": [
+                "source",
+                "tests"
+            ],
+            "mainSourceFile": "tests/runner.d",
+            "dflags": [
+                "-unittest",
+                "-cov"
+            ]
+        }
+    ],
+    "buildTypes": {
+        "debug": {
+            "buildOptions": [
+                "debugMode",
+                "debugInfo"
+            ]
+        },
+        "release": {
+            "buildOptions": [
+                "releaseMode",
+                "optimize",
+                "inline"
+            ],
+            "dflags-ldc": [
+                "-O3",
+                "-release"
+            ]
+        },
+        "release-nobounds": {
+            "buildOptions": [
+                "releaseMode",
+                "optimize",
+                "inline",
+                "noBoundsCheck"
+            ],
+            "dflags-ldc": [
+                "-O3",
+                "-release",
+                "-boundscheck=off"
+            ]
+        }
+    }
+}

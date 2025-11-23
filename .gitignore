@@ -1,0 +1,37 @@
+# Build artifacts
+.dub/
+dub.selections.json
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+aurora-test-*
+__test__*
+
+# Coverage
+*.lst
+*.gcda
+*.gcno
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+CLAUDE.md
+# Docs
+docs/*
+!docs/specs.md

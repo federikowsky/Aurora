@@ -3917,7 +3917,7 @@ Examples where manual SIMD might help:
 - ✅ Configuration system
 - ✅ CORS middleware
 - ✅ Security headers middleware
--  ✅ Graceful shutdown
+- ✅ Graceful shutdown
 - ✅ Multi-threaded workers
 - ✅ NUMA optimization
 - ✅ Testing utilities
