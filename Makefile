@@ -84,14 +84,20 @@ test: check-wire
 	@echo "Running tests via DUB..."
 	@dub test
 
-# Build example: mt_test
-$(BUILD_DIR)/mt_test: $(EXAMPLES_DIR)/mt_test.d $(LIB_OUT) | $(BUILD_DIR)
-	@echo "[DC] Building mt_test..."
+# Build example: decorator_api
+$(BUILD_DIR)/decorator_api: $(EXAMPLES_DIR)/decorator_api.d $(LIB_OUT) | $(BUILD_DIR)
+	@echo "[DC] Building decorator_api..."
+	@$(DC) $(DFLAGS) $< $(LIB_OUT) $(WIRE_LIB) -of=$@ -od=$(BUILD_DIR)
+	@echo "✓ Built: $@"
+
+# Build example: rest_api
+$(BUILD_DIR)/rest_api: $(EXAMPLES_DIR)/rest_api.d $(LIB_OUT) | $(BUILD_DIR)
+	@echo "[DC] Building rest_api..."
 	@$(DC) $(DFLAGS) $< $(LIB_OUT) $(WIRE_LIB) -of=$@ -od=$(BUILD_DIR)
 	@echo "✓ Built: $@"
 
 # Build all examples
-examples: $(BUILD_DIR)/mt_test
+examples: $(BUILD_DIR)/decorator_api $(BUILD_DIR)/rest_api
 	@echo "✓ Examples built"
 
 # ============================================================================

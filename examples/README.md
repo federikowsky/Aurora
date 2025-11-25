@@ -8,6 +8,7 @@ This directory contains comprehensive examples demonstrating Aurora's features.
 |---------|-------------|--------------|
 | `rest_api.d` | Complete REST API | CRUD, JSON, validation, error handling |
 | `router_api.d` | Router-based API | Sub-routers, mounting, modular design |
+| `decorator_api.d` | **FastAPI-style decorators** | @Get, @Post, auto-registration |
 | `middleware_example.d` | Middleware patterns | Auth, rate limiting, logging, error handling |
 | `file_server.d` | Static file server | MIME types, caching, directory listing |
 | `api_gateway.d` | API Gateway | Load balancing, circuit breaker, routing |
@@ -55,7 +56,77 @@ curl -X DELETE http://localhost:8080/api/users/1
 
 ---
 
-## 2. Router-Based API (`router_api.d`)
+## 2. Decorator-Based API (`decorator_api.d`) - FastAPI Style!
+
+The cleanest way to define routes - using UDA (User Defined Attributes) decorators:
+
+```d
+import aurora;
+import aurora.web.decorators;
+
+// Simply decorate your handlers - no manual registration!
+@Get("/users")
+void listUsers(ref Context ctx) {
+    ctx.json(getAllUsers());
+}
+
+@Get("/users/:id")
+void getUser(ref Context ctx) {
+    auto id = ctx.params.get("id");
+    ctx.json(findUser(id));
+}
+
+@Post("/users")
+void createUser(ref Context ctx) {
+    auto body = parseJSON(ctx.request.body);
+    ctx.status(201).json(createNewUser(body));
+}
+
+@Put("/users/:id")
+void updateUser(ref Context ctx) { /* ... */ }
+
+@Patch("/users/:id")  
+void patchUser(ref Context ctx) { /* ... */ }
+
+@Delete("/users/:id")
+void deleteUser(ref Context ctx) { /* ... */ }
+
+void main() {
+    auto router = new Router();
+    
+    // This single line auto-registers ALL decorated handlers!
+    router.autoRegister!(examples.decorator_api)();
+    
+    auto app = new App();
+    app.includeRouter(router);
+    app.listen(8080);
+}
+```
+
+**Available decorators:**
+- `@Get("/path")` - GET requests
+- `@Post("/path")` - POST requests  
+- `@Put("/path")` - PUT requests
+- `@Patch("/path")` - PATCH requests
+- `@Delete("/path")` - DELETE requests
+
+**Build and run:**
+```bash
+ldc2 -O2 decorator_api.d -I../source -I../lib/wire/source \
+    ../build/libaurora.a ../lib/wire/build/libwire.a -of=decorator_api
+./decorator_api
+```
+
+**Test:**
+```bash
+curl http://localhost:8080/tasks
+curl -X POST http://localhost:8080/tasks -d '{"title":"New Task"}'
+curl -X PATCH http://localhost:8080/tasks/1/toggle
+```
+
+---
+
+## 3. Router-Based API (`router_api.d`)
 
 Demonstrates modular API design with sub-routers.
 
@@ -83,7 +154,7 @@ mainRouter.mount("/api/v1/products", productRouter);
 
 ---
 
-## 3. Middleware Pipeline (`middleware_example.d`)
+## 4. Middleware Pipeline (`middleware_example.d`)
 
 Shows how to build and chain middleware.
 
@@ -116,7 +187,7 @@ class AuthMiddleware {
 
 ---
 
-## 4. Static File Server (`file_server.d`)
+## 5. Static File Server (`file_server.d`)
 
 Full-featured file server with caching.
 
@@ -141,7 +212,7 @@ Full-featured file server with caching.
 
 ---
 
-## 5. API Gateway (`api_gateway.d`)
+## 6. API Gateway (`api_gateway.d`)
 
 Microservices gateway with load balancing.
 
@@ -163,7 +234,7 @@ services = [
 
 ---
 
-## 6. Microservice Template (`microservice.d`)
+## 7. Microservice Template (`microservice.d`)
 
 Production-ready microservice structure.
 

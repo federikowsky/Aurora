@@ -12,6 +12,7 @@
 module aurora.web.router;
 
 import aurora.web.context;
+import std.functional : toDelegate;
 
 /**
  * PathParams - Path parameter storage
@@ -245,49 +246,46 @@ class Router
     {
         import aurora.web.decorators;
         
-        // Scan all members of the module at compile-time
+        // Use mixin to avoid alias redefinition in static foreach
         static foreach (memberName; __traits(allMembers, Module))
-        {
-            // Get the member, with compile-time check
+        {{
+            // Double braces create a new scope for each iteration
             static if (__traits(compiles, __traits(getMember, Module, memberName)))
             {
                 alias member = __traits(getMember, Module, memberName);
                 
-                // Check if it's a function with the correct signature
-                static if (is(typeof(&member) : Handler))
+                // Check if it's callable with the correct signature (function or delegate)
+                // Check for both function pointer and delegate compatibility
+                static if (is(typeof(&member) == void function(ref Context)) ||
+                           is(typeof(&member) : void delegate(ref Context)))
                 {
-                    // Scan attributes
+                    // Scan attributes for route decorators
                     static foreach (attr; __traits(getAttributes, member))
-                    {
-                        // Check for @Get
+                    {{
                         static if (is(typeof(attr) == Get))
                         {
-                            this.get(attr.path, &member);
+                            this.get(attr.path, toDelegate(&member));
                         }
-                        // Check for @Post
                         else static if (is(typeof(attr) == Post))
                         {
-                            this.post(attr.path, &member);
+                            this.post(attr.path, toDelegate(&member));
                         }
-                        // Check for @Put
                         else static if (is(typeof(attr) == Put))
                         {
-                            this.put(attr.path, &member);
+                            this.put(attr.path, toDelegate(&member));
                         }
-                        // Check for @Delete
                         else static if (is(typeof(attr) == Delete))
                         {
-                            this.delete_(attr.path, &member);
+                            this.delete_(attr.path, toDelegate(&member));
                         }
-                        // Check for @Patch
                         else static if (is(typeof(attr) == Patch))
                         {
-                            this.patch(attr.path, &member);
+                            this.patch(attr.path, toDelegate(&member));
                         }
-                    }
+                    }}
                 }
             }
-        }
+        }}
     }
     
     /**
