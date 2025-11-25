@@ -37,6 +37,10 @@ LDFLAGS      := -L$(WIRE_DIR)/build -lwire -L$(FASTJSOND_DIR)/build -lfastjsond 
 # Source Files (all D files in source/aurora)
 D_SOURCES := $(shell find $(SRC_DIR) -name '*.d')
 
+# Example sources and targets (auto-discovered)
+EXAMPLE_SOURCES := $(wildcard $(EXAMPLES_DIR)/*.d)
+EXAMPLE_TARGETS := $(patsubst $(EXAMPLES_DIR)/%.d,$(BUILD_DIR)/%,$(EXAMPLE_SOURCES))
+
 # ============================================================================
 # Phony Targets
 # ============================================================================
@@ -96,21 +100,20 @@ test: check-wire check-fastjsond
 	@echo "Running tests via DUB..."
 	@dub test
 
-# Build example: decorator_api
-$(BUILD_DIR)/decorator_api: $(EXAMPLES_DIR)/decorator_api.d $(LIB_OUT) | $(BUILD_DIR)
-	@echo "[DC] Building decorator_api..."
-	@$(DC) $(DFLAGS) $< $(LIB_OUT) $(WIRE_LIB) $(FASTJSOND_LIB) -of=$@ -od=$(BUILD_DIR) -L-lc++
-	@echo "✓ Built: $@"
+# ============================================================================
+# Examples (Pattern Rule - builds any example automatically)
+# ============================================================================
 
-# Build example: rest_api
-$(BUILD_DIR)/rest_api: $(EXAMPLES_DIR)/rest_api.d $(LIB_OUT) | $(BUILD_DIR)
-	@echo "[DC] Building rest_api..."
+# Pattern rule: build any example from examples/*.d
+$(BUILD_DIR)/%: $(EXAMPLES_DIR)/%.d $(LIB_OUT) | $(BUILD_DIR)
+	@echo "[DC] Building $*..."
 	@$(DC) $(DFLAGS) $< $(LIB_OUT) $(WIRE_LIB) $(FASTJSOND_LIB) -of=$@ -od=$(BUILD_DIR) -L-lc++
 	@echo "✓ Built: $@"
 
 # Build all examples
-examples: $(BUILD_DIR)/decorator_api $(BUILD_DIR)/rest_api
-	@echo "✓ Examples built"
+examples: $(EXAMPLE_TARGETS)
+	@echo "✓ All examples built in $(BUILD_DIR)/"
+	@echo "  Targets: $(notdir $(EXAMPLE_TARGETS))"
 
 # ============================================================================
 # Utility Targets
