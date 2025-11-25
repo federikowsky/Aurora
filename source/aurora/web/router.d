@@ -299,6 +299,19 @@ class Router
     }
     
     /**
+     * Mount sub-router at a specific prefix
+     * 
+     * Example:
+     *   mainRouter.mount("/api/v1/products", productRouter);
+     */
+    void mount(string mountPrefix, Router other)
+    {
+        // Set the sub-router's prefix and include it
+        other.prefix = normalizePath(mountPrefix);
+        includeRouter(other);
+    }
+    
+    /**
      * Include sub-router (composition)
      */
     void includeRouter(Router other, Router[] visited = [], string accumulatedPrefix = null)
