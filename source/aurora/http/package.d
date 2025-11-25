@@ -332,6 +332,14 @@ struct HTTPResponse
         return bodyContent;
     }
     
+    /// Get content type
+    @property string getContentType() const
+    {
+        if (auto ct = "Content-Type" in headers)
+            return *ct;
+        return "text/html";  // Default
+    }
+
     /// Get response headers
     @property ref inout(string[string]) getHeaders() inout
     {

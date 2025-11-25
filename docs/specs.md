@@ -392,7 +392,70 @@ Available validation attributes:
 
 **Package**: `aurora.runtime.*`
 
-### 5.1 Threading Model
+### 5.0 Implementation Status (V0.1)
+
+> [!IMPORTANT]
+> **V0.1 Implementation**: L'architettura attuale utilizza un design semplificato ma completamente funzionale.
+
+#### V0.1 Architettura Implementata
+
+**Design**: Single event loop con fiber-based concurrency (vibe-core)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Aurora Server                         │
+├─────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────┐   │
+│  │           vibe-core Event Loop                   │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐        │   │
+│  │  │ Fiber 1  │ │ Fiber 2  │ │ Fiber N  │  ...   │   │
+│  │  │ Conn A   │ │ Conn B   │ │ Conn N   │        │   │
+│  │  └──────────┘ └──────────┘ └──────────┘        │   │
+│  └─────────────────────────────────────────────────┘   │
+│                         ▲                               │
+│                         │ listenTCP()                   │
+│  ┌──────────────────────┴──────────────────────────┐   │
+│  │              TCPListener (Port 8080)             │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Caratteristiche V0.1**:
+- ✅ Cross-platform (Linux, macOS, Windows) - stesso codice su tutte le piattaforme
+- ✅ N workers = N fiber pools (N=1 è caso speciale di N workers)
+- ✅ Zero errori di socket/kqueue (validato con 50K+ requests)
+- ✅ Keep-alive connection support
+- ✅ 9K+ requests/second su MacBook Pro M2
+- ✅ 100% success rate sotto stress test
+
+**API Server (V0.1)**:
+```d
+import aurora.runtime.server;
+
+// Simple handler mode
+auto server = new Server((scope HTTPRequest* req, scope ResponseWriter w) {
+    w.writeJson(200, `{"status":"ok"}`);
+}, ServerConfig.defaults());
+
+// Router mode
+auto router = new Router();
+router.get("/health", (ref Context ctx) {
+    ctx.json(`{"status":"ok"}`);
+});
+auto server = new Server(router, null, config);
+server.run();
+```
+
+**Benchmark Results (V0.1)**:
+| Workers | Requests | Success Rate | Throughput |
+|---------|----------|--------------|------------|
+| 1       | 10,000   | 100%         | 9,641 req/s |
+| 4       | 50,000   | 100%         | 9,198 req/s |
+
+> [!NOTE]
+> V0.2+ implementerà l'architettura multi-thread completa (sezione 5.1) con NUMA affinity e thread pinning per Linux.
+
+### 5.1 Threading Model (V0.2+ Target)
 
 #### 5.1.1 Thread Architecture
 

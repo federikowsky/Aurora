@@ -13,15 +13,15 @@
         "mir-algorithm": "~>3.22.0",
         "unit-threaded": "~>2.1.9"
     },
-    "sourceFiles": [
-        "../Wire/build/libwire.a"
+    "libs": [
+        "wire"
     ],
     "importPaths": [
         "source",
-        "../Wire/source"
+        "/Users/federicofilippi/Desktop/D/Wire/source"
     ],
     "lflags": [
-        "-L../Wire/build"
+        "-L/Users/federicofilippi/Desktop/D/Wire/build"
     ],
     "configurations": [
         {
@@ -75,6 +75,19 @@
             "dflags": [
                 "-unittest",
                 "-cov"
+            ]
+        },
+        {
+            "name": "unified-test",
+            "targetType": "executable",
+            "targetName": "unified_test",
+            "mainSourceFile": "examples/unified_test.d",
+            "sourcePaths": [
+                "source"
+            ],
+            "importPaths": [
+                "source",
+                "/Users/federicofilippi/Desktop/D/Wire/source"
             ]
         }
     ],
