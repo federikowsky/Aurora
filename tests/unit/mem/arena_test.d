@@ -130,16 +130,27 @@ unittest
     arena.available().shouldEqual(0);
 }
 
-// Test 9: Allocate more than arena size
-@("allocate more than arena size returns null or throws")
+// Test 9: Allocate more than arena size uses fallback
+@("allocate more than arena size uses fallback allocation")
 unittest
 {
     auto arena = new Arena(1024);
-    
+
+    // Request more than arena capacity
     auto buffer = arena.allocate(2000);
-    
-    // Should return null when out of space
-    buffer.shouldBeNull;
+
+    // Should succeed via fallback malloc (BUG #7 fix)
+    buffer.shouldNotBeNull;
+    buffer.length.shouldEqual(2000);
+
+    // Verify we can write to it
+    buffer[0] = 42;
+    buffer[1999] = 99;
+    buffer[0].shouldEqual(42);
+    buffer[1999].shouldEqual(99);
+
+    // Cleanup should handle fallback allocations
+    arena.reset();
 }
 
 // Test 10: Allocate 0 bytes
@@ -153,8 +164,8 @@ unittest
     buffer.length.shouldEqual(0);
 }
 
-// Test 11: Arena exhaustion
-@("arena exhaustion is handled gracefully")
+// Test 11: Arena exhaustion uses fallback
+@("arena exhaustion uses fallback gracefully")
 unittest
 {
     auto arena = new Arena(1000);
@@ -165,9 +176,11 @@ unittest
     buf1.shouldNotBeNull;
     buf2.shouldNotBeNull;
     
-    // Arena is now exhausted (with alignment)
+    // Arena space is exhausted (with alignment)
+    // Allocation should succeed via fallback malloc
     auto buf3 = arena.allocate(200);
-    buf3.shouldBeNull;
+    buf3.shouldNotBeNull;  // Fallback allocation works
+    buf3.length.shouldEqual(200);
 }
 
 // Test 12: Reset multiple times
@@ -288,6 +301,54 @@ unittest
     
     // Destroy arena (should cleanup)
     destroy(arena);
-    
+
     // Test passes if no crash
+}
+
+// Test 18: Multiple fallback allocations and cleanup
+@("multiple fallback allocations with cleanup")
+unittest
+{
+    auto arena = new Arena(512);  // Small arena to trigger fallbacks
+
+    // First allocation uses arena
+    auto buf1 = arena.allocate(256);
+    buf1.shouldNotBeNull;
+    buf1.length.shouldEqual(256);
+
+    // Second allocation uses arena
+    auto buf2 = arena.allocate(200);
+    buf2.shouldNotBeNull;
+    buf2.length.shouldEqual(200);
+
+    // Third allocation exceeds arena, uses fallback (BUG #7 fix)
+    auto buf3 = arena.allocate(1000);
+    buf3.shouldNotBeNull;
+    buf3.length.shouldEqual(1000);
+
+    // Fourth large allocation also uses fallback
+    auto buf4 = arena.allocate(2000);
+    buf4.shouldNotBeNull;
+    buf4.length.shouldEqual(2000);
+
+    // Verify all buffers are writable
+    buf1[0] = 1;
+    buf2[0] = 2;
+    buf3[0] = 3;
+    buf4[0] = 4;
+
+    buf1[0].shouldEqual(1);
+    buf2[0].shouldEqual(2);
+    buf3[0].shouldEqual(3);
+    buf4[0].shouldEqual(4);
+
+    // Reset should cleanup both arena and fallback allocations
+    arena.reset();
+
+    // After reset, arena should be available again
+    auto buf5 = arena.allocate(256);
+    buf5.shouldNotBeNull;
+
+    // Cleanup on destroy
+    destroy(arena);
 }

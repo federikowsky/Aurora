@@ -1,0 +1,1307 @@
+/**
+ * Connection Management Tests
+ *
+ * Phase 1: Socket I/O Foundation tests
+ */
+module tests.unit.runtime.connection_test;
+
+import unit_threaded;
+import aurora.runtime.connection;
+import aurora.runtime.reactor;
+import aurora.mem.pool;
+import aurora.http;
+
+// Test 1: Create connection in NEW state
+@("connection starts in NEW state")
+unittest
+{
+    auto conn = Connection(ConnectionState.NEW);
+    conn.state.shouldEqual(ConnectionState.NEW);
+}
+
+// Test 2: Transition to READING_HEADERS
+@("transition to READING_HEADERS")
+unittest
+{
+    auto conn = Connection(ConnectionState.NEW);
+    conn.transition(ConnectionState.READING_HEADERS);
+    conn.state.shouldEqual(ConnectionState.READING_HEADERS);
+}
+
+// Test 3: Full state machine cycle
+@("full state machine cycle")
+unittest
+{
+    auto conn = Connection(ConnectionState.NEW);
+
+    conn.transition(ConnectionState.READING_HEADERS);
+    conn.state.shouldEqual(ConnectionState.READING_HEADERS);
+
+    conn.transition(ConnectionState.PROCESSING);
+    conn.state.shouldEqual(ConnectionState.PROCESSING);
+
+    conn.transition(ConnectionState.WRITING_RESPONSE);
+    conn.state.shouldEqual(ConnectionState.WRITING_RESPONSE);
+
+    conn.transition(ConnectionState.CLOSED);
+    conn.state.shouldEqual(ConnectionState.CLOSED);
+}
+
+// Test 4: isClosed property
+@("isClosed returns true when CLOSED")
+unittest
+{
+    auto conn = Connection(ConnectionState.NEW);
+    conn.isClosed.shouldEqual(false);
+
+    conn.transition(ConnectionState.CLOSED);
+    conn.isClosed.shouldEqual(true);
+}
+
+// Test 5: Keep-alive state
+@("keep-alive state transition")
+unittest
+{
+    auto conn = Connection(ConnectionState.WRITING_RESPONSE);
+    conn.transition(ConnectionState.KEEP_ALIVE);
+    conn.state.shouldEqual(ConnectionState.KEEP_ALIVE);
+}
+
+// ========================================
+// PHASE 1: SOCKET I/O FOUNDATION TESTS
+// ========================================
+
+// Test 6: Connection initializes with socket and resources
+@("connection initialize acquires buffer")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+
+    conn.state.shouldEqual(ConnectionState.NEW);
+    conn.socket.shouldEqual(SocketFD.invalid);
+    assert(conn.readBuffer !is null, "Should have readBuffer");
+    conn.readPos.shouldEqual(0);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 7: Connection close releases buffer
+@("connection close releases buffer")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+
+    assert(conn.readBuffer !is null, "Should have buffer before close");
+
+    conn.close();
+
+    conn.isClosed.shouldEqual(true);
+    // Buffer should be released (but we can't directly test this without BufferPool inspection)
+
+    reactor.destroy();
+}
+
+// Test 8: startReading transitions to READING_HEADERS
+@("startReading transitions to READING_HEADERS")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+
+    conn.startReading();
+
+    conn.state.shouldEqual(ConnectionState.READING_HEADERS);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 9: startWriting transitions to WRITING_RESPONSE
+@("startWriting transitions to WRITING_RESPONSE")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+    conn.state = ConnectionState.PROCESSING;
+    conn.response = HTTPResponse(200, "OK");
+    conn.response.setBody("Test");
+
+    conn.startWriting();
+
+    conn.state.shouldEqual(ConnectionState.WRITING_RESPONSE);
+    assert(conn.writeBuffer !is null, "Should have writeBuffer");
+    conn.writePos.shouldEqual(0);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 10: onReadable with empty buffer doesn't crash
+@("onReadable with empty buffer")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+    conn.state = ConnectionState.READING_HEADERS;
+
+    // Call onReadable with readPos = 0 (no data)
+    // Should not crash, should wait for more data
+    // Note: We can't directly call private onReadable, but we test the state machine
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 11: Multiple connections use separate buffers
+@("multiple connections separate buffers")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn1;
+    conn1.initialize(SocketFD.invalid, pool, reactor);
+
+    Connection conn2;
+    conn2.initialize(SocketFD.invalid, pool, reactor);
+
+    // Each connection should have its own buffer
+    assert(conn1.readBuffer !is null, "conn1 should have buffer");
+    assert(conn2.readBuffer !is null, "conn2 should have buffer");
+    assert(conn1.readBuffer.ptr != conn2.readBuffer.ptr, "Buffers should be different");
+
+    conn1.close();
+    conn2.close();
+    reactor.destroy();
+}
+
+// Test 12: Connection fields initialized correctly
+@("connection fields initialized")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+
+    conn.bufferPool.shouldEqual(pool);
+    conn.reactor.shouldEqual(reactor);
+    conn.readPos.shouldEqual(0);
+    conn.writePos.shouldEqual(0);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 13: startReading registers socket with reactor
+@("startReading registers socket")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+
+    conn.startReading();
+
+    // Socket should be registered for READ events
+    // (We can't directly verify registration, but we test it doesn't crash)
+    conn.state.shouldEqual(ConnectionState.READING_HEADERS);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 14: startWriting registers socket with reactor
+@("startWriting registers socket")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+    conn.state = ConnectionState.PROCESSING;
+    conn.response = HTTPResponse(200, "OK");
+
+    conn.startWriting();
+
+    // Socket should be registered for WRITE events
+    conn.state.shouldEqual(ConnectionState.WRITING_RESPONSE);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 15: close unregisters socket from reactor
+@("close unregisters socket")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+
+    conn.startReading();
+    conn.close();
+
+    conn.isClosed.shouldEqual(true);
+    // Socket should be unregistered (can't directly verify, but shouldn't crash)
+
+    reactor.destroy();
+}
+
+// Test 16: writeBuffer built from HTTPResponse
+@("writeBuffer built from response")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+    conn.state = ConnectionState.PROCESSING;
+    conn.response = HTTPResponse(200, "OK");
+    conn.response.setBody("Hello");
+
+    conn.startWriting();
+
+    assert(conn.writeBuffer !is null, "Should have writeBuffer");
+    assert(conn.writeBuffer.length > 0, "writeBuffer should have data");
+
+    // Check that it contains HTTP response
+    import std.string : indexOf;
+    string responseStr = cast(string)conn.writeBuffer;
+    assert(responseStr.indexOf("HTTP/1.1 200") >= 0, "Should contain status line");
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 17: readBuffer size is SMALL (4KB)
+@("readBuffer size is 4KB")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor);
+
+    // BufferSize.SMALL = 4KB = 4096 bytes
+    conn.readBuffer.length.shouldEqual(4096);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 18: Connection lifecycle (initialize → startReading → startWriting → close)
+@("connection lifecycle")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+
+    // Initialize
+    conn.initialize(SocketFD.invalid, pool, reactor);
+    conn.state.shouldEqual(ConnectionState.NEW);
+
+    // Start reading
+    conn.startReading();
+    conn.state.shouldEqual(ConnectionState.READING_HEADERS);
+
+    // Simulate processing
+    conn.state = ConnectionState.PROCESSING;
+    conn.response = HTTPResponse(200, "OK");
+
+    // Start writing
+    conn.startWriting();
+    conn.state.shouldEqual(ConnectionState.WRITING_RESPONSE);
+
+    // Close
+    conn.close();
+    conn.isClosed.shouldEqual(true);
+
+    reactor.destroy();
+}
+
+// ========================================
+// PHASE 2: TIMEOUT INFRASTRUCTURE TESTS
+// ========================================
+
+// Test 19: startReading creates read timer with config
+@("startReading creates read timer")
+unittest
+{
+    import aurora.runtime.config;
+    import core.time;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    conn.startReading();
+
+    // Timer should be created (non-invalid)
+    assert(conn.readTimer != TimerID.invalid, "Read timer should be created");
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 20: startWriting creates write timer with config
+@("startWriting creates write timer")
+unittest
+{
+    import aurora.runtime.config;
+    import core.time;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+    conn.state = ConnectionState.PROCESSING;
+    conn.response = HTTPResponse(200, "OK");
+
+    conn.startWriting();
+
+    // Timer should be created (non-invalid)
+    assert(conn.writeTimer != TimerID.invalid, "Write timer should be created");
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 21: Timers are invalid when config is null
+@("timers not created without config")
+unittest
+{
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, null);  // No config
+
+    conn.startReading();
+
+    // Timer should remain invalid (no config)
+    conn.readTimer.shouldEqual(TimerID.invalid);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 22: close() cancels all active timers
+@("close cancels all timers")
+unittest
+{
+    import aurora.runtime.config;
+    import core.time;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    conn.startReading();
+    assert(conn.readTimer != TimerID.invalid, "Read timer should be created");
+
+    conn.close();
+
+    // Timers should be cancelled (set to invalid)
+    conn.readTimer.shouldEqual(TimerID.invalid);
+    conn.isClosed.shouldEqual(true);
+
+    reactor.destroy();
+}
+
+// Test 23: onReadable cancels read timer on successful parse
+@("onReadable cancels read timer")
+unittest
+{
+    import aurora.runtime.config;
+    import core.time;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    conn.startReading();
+    assert(conn.readTimer != TimerID.invalid, "Read timer should be created");
+
+    // Simulate successful read by setting readPos > 0
+    conn.readPos = 10;
+
+    // Call onReadable (via reflection or state manipulation)
+    // For now, we'll test via state transition simulation
+    conn.state = ConnectionState.PROCESSING;
+
+    // Cancel timer manually (simulating what onReadable does)
+    if (reactor !is null && conn.readTimer != TimerID.invalid)
+    {
+        reactor.cancelTimer(conn.readTimer);
+        conn.readTimer = TimerID.invalid;
+    }
+
+    conn.readTimer.shouldEqual(TimerID.invalid);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 24: Multiple timer cancellations are safe
+@("multiple timer cancel is safe")
+unittest
+{
+    import aurora.runtime.config;
+    import core.time;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    conn.startReading();
+    assert(conn.readTimer != TimerID.invalid, "Read timer should be created");
+
+    // Cancel once
+    reactor.cancelTimer(conn.readTimer);
+    conn.readTimer = TimerID.invalid;
+
+    // Cancel again (should be safe)
+    reactor.cancelTimer(conn.readTimer);
+
+    // close() should also be safe
+    conn.close();
+
+    reactor.destroy();
+}
+
+// Test 25: Read timeout triggers close
+@("read timeout closes connection")
+unittest
+{
+    import aurora.runtime.config;
+    import core.time;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig(10.msecs, 30.seconds, 60.seconds, 100);
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    conn.startReading();
+    assert(conn.readTimer != TimerID.invalid, "Read timer should be created");
+
+    // Wait for timeout to fire (run reactor)
+    import core.thread;
+    Thread.sleep(20.msecs);
+    reactor.runOnce(5.msecs);
+
+    // Timeout callback should have closed the connection
+    // (Note: In real test, we'd verify close was called, but for now we trust the implementation)
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 26: Write timeout triggers close
+@("write timeout closes connection")
+unittest
+{
+    import aurora.runtime.config;
+    import core.time;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig(30.seconds, 10.msecs, 60.seconds, 100);
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+    conn.state = ConnectionState.PROCESSING;
+    conn.response = HTTPResponse(200, "OK");
+
+    conn.startWriting();
+    assert(conn.writeTimer != TimerID.invalid, "Write timer should be created");
+
+    // Wait for timeout to fire
+    import core.thread;
+    Thread.sleep(20.msecs);
+    reactor.runOnce(5.msecs);
+
+    // Timeout callback should have closed the connection
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 27: Timeout callbacks are @safe nothrow @nogc
+@("timeout callbacks are safe")
+unittest
+{
+    import aurora.runtime.config;
+    import core.time;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // Timeout callbacks should be callable without crashing
+    // They are private, but we can test the public API that uses them
+
+    conn.startReading();
+    assert(conn.readTimer != TimerID.invalid, "Read timer should be created");
+
+    // The fact that we can create timers with these callbacks proves they are @safe nothrow
+    // (If they weren't, compilation would fail when passed to reactor.createTimer)
+
+    conn.close();
+    reactor.destroy();
+}
+
+// ========================================
+// PHASE 3: KEEP-ALIVE LOGIC TESTS
+// ========================================
+
+// Test 28: Keep-alive detection from request
+@("keep-alive detected from request")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // Simulate HTTP request with keep-alive
+    ubyte[] requestData = cast(ubyte[])"GET / HTTP/1.1\r\nHost: test.com\r\nConnection: keep-alive\r\n\r\n";
+    conn.readBuffer[0 .. requestData.length] = requestData;
+    conn.readPos = cast(uint)requestData.length;
+
+    conn.state = ConnectionState.READING_HEADERS;
+    auto req = HTTPRequest.parse(conn.readBuffer[0 .. conn.readPos]);
+    conn.request = req;
+    conn.keepAlive = conn.request.shouldKeepAlive();
+
+    // Should detect keep-alive
+    assert(conn.keepAlive, "Should detect keep-alive from request");
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 29: resetConnection() lifecycle
+@("resetConnection resets state")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // Simulate completed request
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.readPos = 100;
+    conn.writePos = 50;
+    conn.requestsServed = 5;
+
+    conn.resetConnection();
+
+    // State should be reset
+    conn.state.shouldEqual(ConnectionState.READING_HEADERS);
+    conn.readPos.shouldEqual(0);
+    conn.writePos.shouldEqual(0);
+    conn.requestsServed.shouldEqual(6);  // Incremented
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 30: Multiple requests on same connection
+@("multiple requests on same connection")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // First request
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.keepAlive = true;
+    conn.resetConnection();
+    conn.requestsServed.shouldEqual(1);
+
+    // Second request
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.resetConnection();
+    conn.requestsServed.shouldEqual(2);
+
+    // Third request
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.resetConnection();
+    conn.requestsServed.shouldEqual(3);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 31: Request limit enforcement (maxRequestsPerConnection)
+@("request limit closes connection")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig(30.seconds, 30.seconds, 60.seconds, 3);  // Max 3 requests
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // Request 1
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.keepAlive = true;
+    conn.resetConnection();
+    conn.requestsServed.shouldEqual(1);
+    conn.isClosed.shouldEqual(false);
+
+    // Request 2
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.resetConnection();
+    conn.requestsServed.shouldEqual(2);
+    conn.isClosed.shouldEqual(false);
+
+    // Request 3 - should close after this
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.resetConnection();
+
+    // Should be closed (hit limit)
+    conn.isClosed.shouldEqual(true);
+
+    reactor.destroy();
+}
+
+// Test 32: Keep-alive timer expiry
+@("keep-alive timer created on reset")
+unittest
+{
+    import aurora.runtime.config;
+    import core.time;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.keepAlive = true;
+    conn.resetConnection();
+
+    // Read timer should be created for next request
+    assert(conn.readTimer != TimerID.invalid, "Read timer should be created after reset");
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 33: Keep-alive → CLOSED transition
+@("keep-alive to closed transition")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    conn.state = ConnectionState.KEEP_ALIVE;
+    conn.close();
+
+    conn.isClosed.shouldEqual(true);
+
+    reactor.destroy();
+}
+
+// Test 34: Buffer reuse verification
+@("buffer reused after reset")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // Get initial readBuffer pointer
+    auto initialReadBuffer = conn.readBuffer.ptr;
+
+    // Simulate request completion
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.response = HTTPResponse(200, "OK");
+    conn.response.setBody("Test");
+    conn.startWriting();
+
+    // Reset connection
+    conn.resetConnection();
+
+    // readBuffer should be reused (same pointer)
+    assert(conn.readBuffer.ptr == initialReadBuffer, "readBuffer should be reused");
+    // writeBuffer should be released (null)
+    assert(conn.writeBuffer is null, "writeBuffer should be released");
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 35: Request counter increment
+@("request counter increments")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    conn.requestsServed.shouldEqual(0);
+
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.resetConnection();
+    conn.requestsServed.shouldEqual(1);
+
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.resetConnection();
+    conn.requestsServed.shouldEqual(2);
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 36: Close after limit
+@("close after max requests")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig(30.seconds, 30.seconds, 60.seconds, 5);  // Max 5
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // Serve 5 requests
+    foreach (i; 0..5)
+    {
+        conn.state = ConnectionState.WRITING_RESPONSE;
+        conn.resetConnection();
+    }
+
+    // Should be closed
+    conn.isClosed.shouldEqual(true);
+
+    reactor.destroy();
+}
+
+// Test 37: Performance - connection reuse overhead
+@("connection reuse overhead minimal")
+unittest
+{
+    import aurora.runtime.config;
+    import std.datetime.stopwatch;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig(30.seconds, 30.seconds, 60.seconds, 1000);
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // Measure reset time
+    auto sw = StopWatch(AutoStart.yes);
+
+    foreach (i; 0..100)
+    {
+        conn.state = ConnectionState.WRITING_RESPONSE;
+        conn.resetConnection();
+        if (conn.isClosed) break;
+    }
+
+    sw.stop();
+    auto elapsed = sw.peek();
+
+    // Reset should be fast (< 10μs per reset on average)
+    auto avgPerReset = elapsed.total!"usecs" / 100;
+    assert(avgPerReset < 100, "Reset should be fast (< 100μs avg)");
+
+    if (!conn.isClosed)
+        conn.close();
+    reactor.destroy();
+}
+
+// ========================================
+// CRITICAL STRESS TESTS (Production)
+// ========================================
+
+// Test 38: 1K concurrent connections stress
+@("1K concurrent connections")
+unittest
+{
+    import aurora.runtime.config;
+    import core.memory : GC;
+    
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+    
+    // Create 1000 connections
+    Connection[] connections;
+    connections.length = 1000;
+    
+    foreach (i; 0..1000)
+    {
+        connections[i].initialize(SocketFD.invalid, pool, reactor, &config);
+    }
+    
+    // All should be in NEW state
+    foreach (i; 0..1000)
+    {
+        connections[i].state.shouldEqual(ConnectionState.NEW);
+    }
+    
+    // Start reading on all
+    foreach (i; 0..1000)
+    {
+        connections[i].startReading();
+    }
+    
+    // All should be in READING_HEADERS state
+    foreach (i; 0..1000)
+    {
+        connections[i].state.shouldEqual(ConnectionState.READING_HEADERS);
+    }
+    
+    // Close all
+    foreach (i; 0..1000)
+    {
+        connections[i].close();
+    }
+    
+    // All should be closed
+    foreach (i; 0..1000)
+    {
+        connections[i].isClosed.shouldBeTrue;
+    }
+    
+    reactor.destroy();
+    
+    // Force GC to verify no leaks
+    GC.collect();
+}
+
+// Test 39: Rapid connect/disconnect 10K cycles
+@("rapid connect disconnect 10K cycles")
+unittest
+{
+    import aurora.runtime.config;
+    import std.datetime.stopwatch;
+    
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+    
+    auto sw = StopWatch(AutoStart.yes);
+    
+    // 10K rapid cycles
+    foreach (i; 0..10_000)
+    {
+        Connection conn;
+        conn.initialize(SocketFD.invalid, pool, reactor, &config);
+        conn.startReading();
+        conn.close();
+        
+        conn.isClosed.shouldBeTrue;
+    }
+    
+    sw.stop();
+    auto elapsed = sw.peek();
+    
+    // Should complete in reasonable time (< 5 seconds for 10K cycles)
+    assert(elapsed.total!"seconds" < 5, "Rapid cycles too slow");
+    
+    reactor.destroy();
+}
+
+// Test 40: 10K concurrent connections extreme stress
+@("10K concurrent connections extreme")
+unittest
+{
+    import aurora.runtime.config;
+    import core.memory : GC;
+    import std.datetime.stopwatch;
+    
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+    
+    auto sw = StopWatch(AutoStart.yes);
+    
+    // Create 10,000 connections
+    Connection[] connections;
+    connections.length = 10_000;
+    
+    foreach (i; 0..10_000)
+    {
+        connections[i].initialize(SocketFD.invalid, pool, reactor, &config);
+    }
+    
+    // Start reading on all
+    foreach (i; 0..10_000)
+    {
+        connections[i].startReading();
+    }
+    
+    // Verify all in READING_HEADERS state
+    foreach (i; 0..10_000)
+    {
+        connections[i].state.shouldEqual(ConnectionState.READING_HEADERS);
+    }
+    
+    // Close all
+    foreach (i; 0..10_000)
+    {
+        connections[i].close();
+    }
+    
+    sw.stop();
+    
+    // All should be closed
+    foreach (i; 0..10_000)
+    {
+        connections[i].isClosed.shouldBeTrue;
+    }
+    
+    // Should complete in reasonable time (< 10 seconds)
+    assert(sw.peek().total!"seconds" < 10, "10K connections too slow");
+    
+    reactor.destroy();
+    
+    // Force GC to verify no leaks
+    GC.collect();
+}
+
+// Test 41: Connection pool exhaustion
+@("connection pool exhaustion")
+unittest
+{
+    import aurora.runtime.config;
+    
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+    
+    // Create many connections to exhaust pool
+    Connection[] connections;
+    connections.length = 5000;
+    
+    foreach (i; 0..5000)
+    {
+        connections[i].initialize(SocketFD.invalid, pool, reactor, &config);
+        connections[i].startReading();
+    }
+    
+    // All should have buffers (pool should handle exhaustion gracefully)
+    foreach (i; 0..5000)
+    {
+        assert(connections[i].readBuffer !is null, "Buffer should be allocated");
+    }
+    
+    // Close all
+    foreach (i; 0..5000)
+    {
+        connections[i].close();
+    }
+    
+    reactor.destroy();
+}
+
+// Test 42: Rapid connect/disconnect 1M cycles extreme
+@("rapid connect disconnect 1M cycles extreme")
+unittest
+{
+    import aurora.runtime.config;
+    import std.datetime.stopwatch;
+    import core.memory : GC;
+    
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+    
+    auto sw = StopWatch(AutoStart.yes);
+    
+    // 1M rapid cycles
+    foreach (i; 0..1_000_000)
+    {
+        Connection conn;
+        conn.initialize(SocketFD.invalid, pool, reactor, &config);
+        conn.startReading();
+        conn.close();
+        
+        // Periodic verification
+        if (i % 100_000 == 0)
+        {
+            conn.isClosed.shouldBeTrue;
+        }
+    }
+    
+    sw.stop();
+    
+    // Should complete in reasonable time (< 60 seconds for 1M cycles)
+    assert(sw.peek().total!"seconds" < 60, "1M rapid cycles too slow");
+    
+    reactor.destroy();
+    
+    // Force GC to check for leaks
+    GC.collect();
+}
+
+// Test 43: Memory fragmentation test
+@("memory fragmentation stress")
+unittest
+{
+    import aurora.runtime.config;
+    import core.memory : GC;
+    
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+    
+    // Get baseline memory
+    GC.collect();
+    auto memBefore = GC.stats().usedSize;
+    
+    // Create and destroy connections in fragmented pattern
+    foreach (cycle; 0..100)
+    {
+        Connection[] connections;
+        connections.length = 1000;
+        
+        // Create 1000 connections
+        foreach (i; 0..1000)
+        {
+            connections[i].initialize(SocketFD.invalid, pool, reactor, &config);
+            connections[i].startReading();
+        }
+        
+        // Close every other connection (fragmentation)
+        foreach (i; 0..1000)
+        {
+            if (i % 2 == 0)
+                connections[i].close();
+        }
+        
+        // Close remaining
+        foreach (i; 0..1000)
+        {
+            if (i % 2 == 1)
+                connections[i].close();
+        }
+    }
+    
+    // Force GC
+    GC.collect();
+    auto memAfter = GC.stats().usedSize;
+    
+    // Memory growth should be minimal (< 50MB for 100K connections)
+    auto memGrowth = memAfter - memBefore;
+    assert(memGrowth < 50_000_000, "Memory fragmentation detected: " ~ memGrowth.to!string ~ " bytes");
+
+    reactor.destroy();
+}
+
+// ========================================
+// BUG FIX VALIDATION TESTS
+// ========================================
+
+// Test 44: Large request handling with buffer resizing (BUG #2)
+@("large request with dynamic buffer resizing")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // Simulate large request (8KB headers)
+    conn.state = ConnectionState.READING_HEADERS;
+
+    // Fill buffer to 90% capacity (4KB * 0.9 = ~3.6KB)
+    conn.readPos = cast(size_t)(conn.readBuffer.length * 0.9);
+
+    // Buffer should be 4KB initially
+    conn.readBuffer.length.shouldEqual(4 * 1024);
+
+    // The resize logic triggers at 90% full
+    // After first resize: 4KB → 8KB or 16KB (MEDIUM)
+    // Note: Actual resize happens in read loop, we just verify the logic exists
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 45: Double-initialize cleanup (BUG #3)
+@("double initialize cleans up previous state")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+
+    // First initialization
+    conn.initialize(SocketFD(100), pool, reactor, &config);
+    conn.state = ConnectionState.READING_HEADERS;
+    conn.readPos = 50;
+    auto firstBuffer = conn.readBuffer;
+
+    // Second initialization (should clean up first)
+    conn.initialize(SocketFD(200), pool, reactor, &config);
+
+    // State should be reset
+    conn.state.shouldEqual(ConnectionState.NEW);
+    conn.readPos.shouldEqual(0);
+    conn.socket.shouldEqual(SocketFD(200));
+
+    // Buffer should be fresh (different instance)
+    // Note: Can't directly test socket close or timer cancellation with mock sockets
+
+    conn.close();
+    reactor.destroy();
+}
+
+// Test 46: Double close idempotency (BUG #4)
+@("double close is idempotent")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // First close
+    conn.close();
+    conn.state.shouldEqual(ConnectionState.CLOSED);
+    conn.socket.shouldEqual(SocketFD.invalid);
+
+    // Second close (should not crash or error)
+    conn.close();
+    conn.state.shouldEqual(ConnectionState.CLOSED);
+    conn.socket.shouldEqual(SocketFD.invalid);
+
+    reactor.destroy();
+}
+
+// Test 47: Request counter integration with resetConnection (BUG #5)
+@("requestsServed increments in resetConnection")
+unittest
+{
+    import aurora.runtime.config;
+
+    auto pool = new BufferPool();
+    auto reactor = new Reactor();
+    auto config = ConnectionConfig.defaults();
+
+    Connection conn;
+    conn.initialize(SocketFD.invalid, pool, reactor, &config);
+
+    // Initial state
+    conn.requestsServed.shouldEqual(0);
+
+    // Simulate request completion and reset
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.resetConnection();
+
+    // Counter should increment
+    conn.requestsServed.shouldEqual(1);
+
+    // Second reset
+    conn.state = ConnectionState.WRITING_RESPONSE;
+    conn.resetConnection();
+    conn.requestsServed.shouldEqual(2);
+
+    conn.close();
+    reactor.destroy();
+}

@@ -1,0 +1,567 @@
+/**
+ * Worker Thread Tests
+ *
+ * TDD: Aurora Worker thread abstraction
+ *
+ * Features:
+ * - Worker creation and lifecycle
+ * - Thread-local memory isolation
+ * - NUMA awareness (structure)
+ * - Concurrent workers
+ * - Clean shutdown
+ */
+module tests.unit.runtime.worker_test;
+
+import unit_threaded;
+import aurora.runtime.worker;
+import aurora.mem;
+import core.thread;
+import core.time;
+
+// ========================================
+// HAPPY PATH TESTS
+// ========================================
+
+// Test 1: Create worker → thread starts
+@("create worker starts thread")
+unittest
+{
+    auto worker = Worker(0, 0);
+    worker.start();
+
+    // Give thread time to start
+    Thread.sleep(10.msecs);
+
+    worker.running.shouldEqual(true);
+    worker.thread.shouldNotEqual(null);
+
+    worker.stopAll();
+    worker.join();
+}
+
+// Test 2: Worker runs → event loop executes
+@("worker runs event loop")
+unittest
+{
+    auto worker = Worker(0, 0);
+    worker.start();
+
+    Thread.sleep(20.msecs);
+
+    // Worker should still be running
+    worker.running.shouldEqual(true);
+
+    worker.stopAll();
+    worker.join();
+}
+
+// Test 3: Shutdown worker → clean exit
+@("shutdown worker clean exit")
+unittest
+{
+    auto worker = Worker(0, 0);
+    worker.start();
+
+    Thread.sleep(10.msecs);
+
+    worker.stopAll();
+    worker.join();
+
+    worker.running.shouldEqual(false);
+}
+
+// Test 4: Worker name set correctly
+@("worker name set correctly")
+unittest
+{
+    auto worker = Worker(0, 0);
+    worker.name.shouldEqual("Worker-0");
+
+    auto worker2 = Worker(5, 0);
+    worker2.name.shouldEqual("Worker-5");
+}
+
+// Test 5: Worker ID set correctly
+@("worker ID set correctly")
+unittest
+{
+    auto worker1 = Worker(0, 0);
+    worker1.id.shouldEqual(0);
+
+    auto worker2 = Worker(7, 0);
+    worker2.id.shouldEqual(7);
+}
+
+// Test 6: Thread-local memory initialized
+@("thread-local memory initialized")
+unittest
+{
+    auto worker = Worker(0, 0);
+    worker.start();
+
+    Thread.sleep(10.msecs);
+
+    // Check that thread-local structures are initialized
+    worker.memoryPool.shouldNotEqual(null);
+    worker.arena.shouldNotEqual(null);
+
+    worker.stopAll();
+    worker.join();
+}
+
+// ========================================
+// EDGE CASE TESTS
+// ========================================
+
+// Test 7: Worker on specific NUMA node → structure set
+@("worker numa node set")
+unittest
+{
+    auto worker = Worker(0, 1);
+    worker.numaNode.shouldEqual(1);
+
+    auto worker2 = Worker(1, 3);
+    worker2.numaNode.shouldEqual(3);
+}
+
+// Test 8: Create worker with ID 0 → valid
+@("worker id zero valid")
+unittest
+{
+    auto worker = Worker(0, 0);
+    worker.id.shouldEqual(0);
+    worker.name.shouldEqual("Worker-0");
+}
+
+// Test 9: Create worker with high ID → valid
+@("worker high id valid")
+unittest
+{
+    auto worker = Worker(255, 0);
+    worker.id.shouldEqual(255);
+    worker.name.shouldEqual("Worker-255");
+}
+
+// Test 10: Worker thread-local data isolation
+@("worker thread-local isolation")
+unittest
+{
+    auto worker1 = Worker(0, 0);
+    auto worker2 = Worker(1, 0);
+
+    worker1.start();
+    worker2.start();
+
+    Thread.sleep(20.msecs);
+
+    // Each worker should have different memory pool instances
+    worker1.memoryPool.shouldNotEqual(worker2.memoryPool);
+    worker1.arena.shouldNotEqual(worker2.arena);
+
+    worker1.stopAll();
+    worker2.stopAll();
+    worker1.join();
+    worker2.join();
+}
+
+// ========================================
+// CONCURRENCY TESTS
+// ========================================
+
+// Test 11: 8 workers concurrent → no interference
+@("eight workers concurrent")
+unittest
+{
+    Worker[8] workers;
+
+    foreach (i; 0..8)
+    {
+        workers[i] = Worker(cast(uint)i, 0);
+        workers[i].start();
+    }
+
+    Thread.sleep(50.msecs);
+
+    // All should be running
+    foreach (i; 0..8)
+    {
+        workers[i].running.shouldEqual(true);
+    }
+
+    // Stop all
+    foreach (i; 0..8)
+    {
+        workers[i].stop();
+    }
+
+    // Join all
+    foreach (i; 0..8)
+    {
+        workers[i].join();
+    }
+}
+
+// Test 12: Worker-local BufferPools isolated
+@("worker buffer pools isolated")
+unittest
+{
+    Worker[4] workers;
+
+    foreach (i; 0..4)
+    {
+        workers[i] = Worker(cast(uint)i, 0);
+        workers[i].start();
+    }
+
+    Thread.sleep(20.msecs);
+
+    // Each worker has unique pool
+    for (size_t i = 0; i < 4; i++)
+    {
+        for (size_t j = i + 1; j < 4; j++)
+        {
+            workers[i].memoryPool.shouldNotEqual(workers[j].memoryPool);
+        }
+    }
+
+    foreach (i; 0..4)
+    {
+        workers[i].stop();
+        workers[i].join();
+    }
+}
+
+// Test 13: Multiple workers same NUMA node → valid
+@("multiple workers same numa node")
+unittest
+{
+    auto worker1 = Worker(0, 1);
+    auto worker2 = Worker(1, 1);
+    auto worker3 = Worker(2, 1);
+
+    worker1.numaNode.shouldEqual(1);
+    worker2.numaNode.shouldEqual(1);
+    worker3.numaNode.shouldEqual(1);
+}
+
+// Test 14: Shared stats atomic access
+@("shared stats atomic")
+unittest
+{
+    auto worker = Worker(0, 0);
+    worker.start();
+
+    Thread.sleep(10.msecs);
+
+    // Increment stats from main thread (simulating atomic access)
+    import core.atomic;
+    atomicOp!"+="(worker.stats.tasksProcessed, 1);
+
+    worker.stopAll();
+    worker.join();
+
+    worker.stats.tasksProcessed.shouldBeGreaterThanOrEqualTo(1);
+}
+
+// Test 15: Stop all workers concurrently
+@("stop workers concurrently")
+unittest
+{
+    Worker[4] workers;
+
+    foreach (i; 0..4)
+    {
+        workers[i] = Worker(cast(uint)i, 0);
+        workers[i].start();
+    }
+
+    Thread.sleep(20.msecs);
+
+    // Stop all concurrently
+    foreach (i; 0..4)
+    {
+        workers[i].stop();
+    }
+
+    // Join all
+    foreach (i; 0..4)
+    {
+        workers[i].join();
+    }
+
+    // All should be stopped
+    foreach (i; 0..4)
+    {
+        workers[i].running.shouldEqual(false);
+    }
+}
+
+// ========================================
+// PERFORMANCE TESTS
+// ========================================
+
+// Test 16: Worker startup < 10ms
+@("worker startup performance")
+unittest
+{
+    import std.datetime.stopwatch;
+
+    auto sw = StopWatch(AutoStart.yes);
+
+    auto worker = Worker(0, 0);
+    worker.start();
+
+    sw.stop();
+
+    auto elapsed = sw.peek();
+
+    worker.stopAll();
+    worker.join();
+
+    // Startup should be < 10ms
+    elapsed.total!"msecs".shouldBeLessThan(10);
+}
+
+// Test 17: Worker shutdown < 100ms
+@("worker shutdown performance")
+unittest
+{
+    import std.datetime.stopwatch;
+
+    auto worker = Worker(0, 0);
+    worker.start();
+
+    Thread.sleep(10.msecs);
+
+    auto sw = StopWatch(AutoStart.yes);
+
+    worker.stopAll();
+    worker.join();
+
+    sw.stop();
+
+    auto elapsed = sw.peek();
+
+    // Shutdown should be < 100ms
+    elapsed.total!"msecs".shouldBeLessThan(100);
+}
+
+// Test 18: Thread creation overhead measured
+@("thread creation overhead")
+unittest
+{
+    import std.datetime.stopwatch;
+
+    auto sw = StopWatch(AutoStart.yes);
+
+    auto worker = Worker(0, 0);
+
+    sw.stop();
+
+    auto elapsed = sw.peek();
+
+    // Worker struct creation should be nearly instant (< 1ms)
+    elapsed.total!"usecs".shouldBeLessThan(1000);
+}
+
+// Test 19: Context switch to worker thread
+@("context switch timing")
+unittest
+{
+    import std.datetime.stopwatch;
+    import core.atomic;
+
+    auto worker = Worker(0, 0);
+    worker.start();
+
+    auto sw = StopWatch(AutoStart.yes);
+
+    // Simulate work in worker (atomic increment)
+    atomicOp!"+="(worker.stats.tasksProcessed, 1);
+
+    sw.stop();
+
+    worker.stopAll();
+    worker.join();
+
+    auto elapsed = sw.peek();
+
+    // Atomic operation should be fast (< 1ms)
+    elapsed.total!"usecs".shouldBeLessThan(1000);
+}
+
+// Test 20: Worker running flag thread-safe
+@("worker running flag thread safe")
+unittest
+{
+    auto worker = Worker(0, 0);
+    worker.start();
+
+    Thread.sleep(10.msecs);
+
+    // Read from main thread (should be safe with shared)
+    bool isRunning = worker.running;
+    isRunning.shouldEqual(true);
+
+    worker.stopAll();
+    worker.join();
+
+    isRunning = worker.running;
+    isRunning.shouldEqual(false);
+}
+
+// ========================================
+// CRITICAL STRESS TESTS (Production)
+// ========================================
+
+// Test 21: 8 workers under load
+@("8 workers under load stress")
+unittest
+{
+    import std.datetime.stopwatch;
+    import core.atomic;
+    
+    Worker[8] workers;
+    
+    // Start all workers
+    foreach (i; 0..8)
+    {
+        workers[i] = Worker(cast(uint)i, cast(uint)(i % 2)); // Alternate NUMA nodes
+        workers[i].start();
+    }
+    
+    Thread.sleep(50.msecs);
+    
+    // All should be running
+    foreach (i; 0..8)
+    {
+        workers[i].running.shouldEqual(true);
+    }
+    
+    auto sw = StopWatch(AutoStart.yes);
+    
+    // Simulate load: increment task counter 10K times per worker
+    foreach (i; 0..8)
+    {
+        foreach (j; 0..10_000)
+        {
+            atomicOp!"+="(workers[i].stats.tasksProcessed, 1);
+        }
+    }
+    
+    sw.stop();
+    
+    // Verify all workers processed tasks
+    foreach (i; 0..8)
+    {
+        workers[i].stats.tasksProcessed.shouldBeGreaterThanOrEqualTo(10_000);
+    }
+    
+    // Stop all workers
+    foreach (i; 0..8)
+    {
+        workers[i].stop();
+    }
+    
+    // Join all
+    foreach (i; 0..8)
+    {
+        workers[i].join();
+    }
+    
+    // Should complete in reasonable time (< 2 seconds)
+    assert(sw.peek().total!"seconds" < 2, "Worker load test too slow");
+}
+
+// Test 22: 100+ workers concurrent stress
+@("100 workers concurrent extreme stress")
+unittest
+{
+    import std.datetime.stopwatch;
+    import core.atomic;
+    
+    enum WORKER_COUNT = 100;
+    Worker[WORKER_COUNT] workers;
+    
+    auto sw = StopWatch(AutoStart.yes);
+    
+    // Start all 100 workers
+    foreach (i; 0..WORKER_COUNT)
+    {
+        workers[i] = Worker(cast(uint)i, cast(uint)(i % 4)); // 4 NUMA nodes
+        workers[i].start();
+    }
+    
+    Thread.sleep(100.msecs);
+    
+    // All should be running
+    foreach (i; 0..WORKER_COUNT)
+    {
+        workers[i].running.shouldEqual(true);
+    }
+    
+    // Simulate load: 1K tasks per worker (100K total)
+    foreach (i; 0..WORKER_COUNT)
+    {
+        foreach (j; 0..1_000)
+        {
+            atomicOp!"+="(workers[i].stats.tasksProcessed, 1);
+        }
+    }
+    
+    // Verify all workers processed tasks
+    foreach (i; 0..WORKER_COUNT)
+    {
+        workers[i].stats.tasksProcessed.shouldBeGreaterThanOrEqualTo(1_000);
+    }
+    
+    // Stop all workers
+    foreach (i; 0..WORKER_COUNT)
+    {
+        workers[i].stop();
+    }
+    
+    // Join all
+    foreach (i; 0..WORKER_COUNT)
+    {
+        workers[i].join();
+    }
+    
+    sw.stop();
+    
+    // Should complete in reasonable time (< 5 seconds for 100 workers)
+    assert(sw.peek().total!"seconds" < 5, "100 workers stress too slow");
+}
+
+// Test 23: Worker crash recovery simulation
+@("worker crash recovery")
+unittest
+{
+    import core.atomic;
+    
+    auto worker = Worker(0, 0);
+    worker.start();
+    
+    Thread.sleep(20.msecs);
+    worker.running.shouldEqual(true);
+    
+    // Simulate crash by stopping abruptly
+    worker.stopAll();
+    worker.join();
+    
+    worker.running.shouldEqual(false);
+    
+    // Restart worker (recovery)
+    worker = Worker(0, 0);
+    worker.start();
+    
+    Thread.sleep(20.msecs);
+    worker.running.shouldEqual(true);
+    
+    // Should work normally after "recovery"
+    atomicOp!"+="(worker.stats.tasksProcessed, 1);
+    worker.stats.tasksProcessed.shouldBeGreaterThanOrEqualTo(1);
+    
+    worker.stopAll();
+    worker.join();
+}

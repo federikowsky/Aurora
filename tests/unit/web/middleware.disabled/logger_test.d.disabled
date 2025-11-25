@@ -1,0 +1,548 @@
+/**
+ * Logger Middleware Tests
+ *
+ * TDD: Aurora Logger Middleware
+ *
+ * Features:
+ * - Request/response logging
+ * - Duration measurement
+ * - Structured output
+ * - Configurable log level
+ */
+module tests.unit.web.middleware.logger_test;
+
+import unit_threaded;
+import aurora.web.middleware.logger;
+import aurora.web.middleware;
+import aurora.web.context;
+import aurora.http;
+
+// ========================================
+// REQUEST LOGGED TESTS
+// ========================================
+
+// Test 1: Method logged
+@("logger logs method")
+unittest
+{
+    bool logged = false;
+    string loggedMethod;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        logged = true;
+        // Extract method from log message
+        import std.string : indexOf;
+        auto spacePos = msg.indexOf(' ');
+        if (spacePos > 0) {
+            loggedMethod = msg[0 .. spacePos];
+        }
+    });
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    logger.handle(ctx, &next);
+    
+    logged.shouldBeTrue;
+    loggedMethod.shouldEqual("GET");
+}
+
+// Test 2: Path logged
+@("logger logs path")
+unittest
+{
+    string loggedPath;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        // Extract path from log message
+        import std.string : split;
+        auto parts = msg.split(' ');
+        if (parts.length > 1) {
+            loggedPath = parts[1];
+        }
+    });
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/users/123";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    logger.handle(ctx, &next);
+    
+    loggedPath.shouldEqual("/users/123");
+}
+
+// Test 3: Status logged
+@("logger logs status code")
+unittest
+{
+    int loggedStatus;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        // Extract status from log message
+        import std.string : split;
+        auto parts = msg.split(' ');
+        if (parts.length > 2) {
+            import std.conv : to;
+            loggedStatus = parts[2].to!int;
+        }
+    });
+    
+    Context ctx;
+    HTTPRequest req;
+    HTTPResponse res;
+    req.method = "GET";
+    req.path = "/test";
+    res.statusCode = 200;
+    ctx.request = &req;
+    ctx.response = &res;
+    
+    void next() { }
+    
+    logger.handle(ctx, &next);
+    
+    loggedStatus.shouldEqual(200);
+}
+
+// Test 4: Headers logged (optional)
+@("logger can log headers")
+unittest
+{
+    auto logger = new LoggerMiddleware();
+    logger.logHeaders = true;
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    req.headers["User-Agent"] = "TestClient/1.0";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    // Should not throw
+    logger.handle(ctx, &next);
+}
+
+// Test 5: Request body logged (optional)
+@("logger can log request body")
+unittest
+{
+    auto logger = new LoggerMiddleware();
+    logger.logBody = true;
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "POST";
+    req.path = "/users";
+    req.body = cast(ubyte[])"test body";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    // Should not throw
+    logger.handle(ctx, &next);
+}
+
+// ========================================
+// DURATION MEASUREMENT TESTS
+// ========================================
+
+// Test 6: Duration measured
+@("logger measures duration")
+unittest
+{
+    import core.time : Duration;
+    
+    Duration loggedDuration;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        // Extract duration from log message
+        import std.string : indexOf;
+        auto usPos = msg.indexOf("μs");
+        if (usPos > 0) {
+            import std.conv : to;
+            import std.string : split;
+            auto parts = msg[0 .. usPos].split(' ');
+            if (parts.length > 0) {
+                auto durStr = parts[$-1];
+                import core.time : usecs;
+                loggedDuration = durStr.to!long.usecs;
+            }
+        }
+    });
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    
+    void next() {
+        import core.thread : Thread;
+        import core.time : msecs;
+        Thread.sleep(10.msecs);
+    }
+    
+    logger.handle(ctx, &next);
+    
+    // Duration should be >= 10ms
+    assert(loggedDuration.total!"msecs" >= 10, "Duration not measured correctly");
+}
+
+// Test 7: Multiple requests measured
+@("logger measures multiple requests")
+unittest
+{
+    int logCount = 0;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        logCount++;
+    });
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    foreach (i; 0..5)
+    {
+        logger.handle(ctx, &next);
+    }
+    
+    logCount.shouldEqual(5);
+}
+
+// Test 8: Timing accuracy
+@("logger timing accurate")
+unittest
+{
+    import std.datetime.stopwatch;
+    
+    auto logger = new LoggerMiddleware();
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    
+    auto sw = StopWatch(AutoStart.yes);
+    
+    void next() {
+        import core.thread : Thread;
+        import core.time : msecs;
+        Thread.sleep(5.msecs);
+    }
+    
+    logger.handle(ctx, &next);
+    
+    sw.stop();
+    
+    // Logger overhead should be minimal
+    assert(sw.peek().total!"msecs" < 100, "Logger too slow");
+}
+
+// ========================================
+// LOG FORMAT TESTS
+// ========================================
+
+// Test 9: JSON format
+@("logger supports JSON format")
+unittest
+{
+    auto logger = new LoggerMiddleware();
+    logger.format = LogFormat.JSON;
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    // Should not throw
+    logger.handle(ctx, &next);
+}
+
+// Test 10: Custom format
+@("logger supports custom format")
+unittest
+{
+    string customLog;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        customLog = msg;
+    });
+    
+    logger.format = LogFormat.CUSTOM;
+    logger.customFormat = "{method} {path} -> {status}";
+    
+    Context ctx;
+    HTTPRequest req;
+    HTTPResponse res;
+    req.method = "POST";
+    req.path = "/users";
+    res.statusCode = 201;
+    ctx.request = &req;
+    ctx.response = &res;
+    
+    void next() { }
+    
+    logger.handle(ctx, &next);
+    
+    customLog.shouldEqual("POST /users -> 201");
+}
+
+// Test 11: Log level filtering
+@("logger respects log level")
+unittest
+{
+    int debugCount = 0;
+    int infoCount = 0;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        infoCount++;
+    });
+    
+    logger.level = LogLevel.INFO;
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    logger.handle(ctx, &next);
+    
+    infoCount.shouldEqual(1);
+}
+
+// Test 12: All fields present
+@("logger includes all fields")
+unittest
+{
+    string logMsg;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        logMsg = msg;
+    });
+    
+    Context ctx;
+    HTTPRequest req;
+    HTTPResponse res;
+    req.method = "GET";
+    req.path = "/api/users";
+    res.statusCode = 200;
+    ctx.request = &req;
+    ctx.response = &res;
+    
+    void next() { }
+    
+    logger.handle(ctx, &next);
+    
+    // Should contain method, path, status
+    import std.string : indexOf;
+    assert(logMsg.indexOf("GET") >= 0, "Missing method");
+    assert(logMsg.indexOf("/api/users") >= 0, "Missing path");
+    assert(logMsg.indexOf("200") >= 0, "Missing status");
+}
+
+// ========================================
+// EDGE CASES
+// ========================================
+
+// Test 13: Empty request
+@("logger handles empty request")
+unittest
+{
+    auto logger = new LoggerMiddleware();
+    
+    Context ctx;
+    HTTPRequest req;
+    ctx.request = &req;
+    
+    void next() { }
+    
+    // Should not throw
+    logger.handle(ctx, &next);
+}
+
+// Test 14: Long request path
+@("logger handles long path")
+unittest
+{
+    import std.array : replicate;
+    
+    auto logger = new LoggerMiddleware();
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/" ~ replicate("a", 1000);
+    ctx.request = &req;
+    
+    void next() { }
+    
+    // Should not throw
+    logger.handle(ctx, &next);
+}
+
+// Test 15: Error in handler
+@("logger logs even on error")
+unittest
+{
+    bool logged = false;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        logged = true;
+    });
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    
+    void next() {
+        throw new Exception("Test error");
+    }
+    
+    try {
+        logger.handle(ctx, &next);
+    } catch (Exception) {
+        // Expected
+    }
+    
+    logged.shouldBeTrue;
+}
+
+// Test 16: Missing response
+@("logger handles missing response")
+unittest
+{
+    auto logger = new LoggerMiddleware();
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    // No response set
+    
+    void next() { }
+    
+    // Should not throw
+    logger.handle(ctx, &next);
+}
+
+// Test 17: Null request
+@("logger handles null request")
+unittest
+{
+    auto logger = new LoggerMiddleware();
+    
+    Context ctx;
+    // No request set
+    
+    void next() { }
+    
+    // Should not throw (or handle gracefully)
+    logger.handle(ctx, &next);
+}
+
+// ========================================
+// PERFORMANCE TESTS
+// ========================================
+
+// Test 18: Overhead < 100ns
+@("logger overhead minimal")
+unittest
+{
+    import std.datetime.stopwatch;
+    
+    auto logger = new LoggerMiddleware();
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    auto sw = StopWatch(AutoStart.yes);
+    
+    foreach (i; 0..1000)
+    {
+        logger.handle(ctx, &next);
+    }
+    
+    sw.stop();
+    auto avgNs = sw.peek().total!"nsecs" / 1000;
+    
+    // Should be < 10μs per request (relaxed for debug)
+    assert(avgNs < 100000, "Logger too slow: " ~ avgNs.to!string ~ "ns");
+}
+
+// Test 19: 1000 requests stable
+@("logger handles 1000 requests")
+unittest
+{
+    int logCount = 0;
+    
+    auto logger = new LoggerMiddleware((string msg) {
+        logCount++;
+    });
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    foreach (i; 0..1000)
+    {
+        logger.handle(ctx, &next);
+    }
+    
+    logCount.shouldEqual(1000);
+}
+
+// Test 20: No memory leak
+@("logger no memory leak")
+unittest
+{
+    auto logger = new LoggerMiddleware();
+    
+    Context ctx;
+    HTTPRequest req;
+    req.method = "GET";
+    req.path = "/test";
+    ctx.request = &req;
+    
+    void next() { }
+    
+    // Run many times
+    foreach (i; 0..10000)
+    {
+        logger.handle(ctx, &next);
+    }
+    
+    // If we get here without crash, no obvious leak
+}

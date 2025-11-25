@@ -12,6 +12,22 @@ dub.selections.json
 aurora-test-*
 __test__*
 
+# Root executable
+/aurora
+
+# Compiled example binaries (keep .d and .py files)
+examples/app_server
+examples/async_parser_test
+examples/bare_server
+examples/debug_server
+examples/micro_server
+examples/minimal_server
+examples/parser_test
+examples/production_server
+examples/sync_server
+examples/test_client
+examples/test_server
+
 # Coverage
 *.lst
 *.gcda
@@ -31,7 +47,7 @@ Thumbs.db
 # Logs
 *.log
 
-CLAUDE.md
+# CLAUDE.md
 # Docs
-docs/*
-!docs/specs.md
+# docs/*
+# !docs/specs.md

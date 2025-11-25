@@ -170,22 +170,30 @@ unittest
 // EDGE CASE TESTS
 // ========================================
 
-// Test 8: Pool exhaustion allocates new objects
-@("pool exhaustion allocates new objects")
+// Test 8: Pool exhaustion returns null (fixed capacity)
+@("pool exhaustion returns null")
 unittest
 {
-    auto pool = new ObjectPool!TestObject();
-    
-    // Exhaust pool
+    // Create pool with explicit capacity of 256 to test exhaustion
+    auto pool = new ObjectPool!TestObject(256);
+
+    // Exhaust pool (capacity = 256)
     TestObject*[] objects;
-    foreach (i; 0..100)
+    foreach (i; 0..256)
     {
-        objects ~= pool.acquire();
+        auto obj = pool.acquire();
+        obj.shouldNotBeNull; // All within capacity should succeed
+        objects ~= obj;
     }
-    
-    // Should still work (allocate new)
+
+    // Beyond capacity should return null (BUG #4 fix: no unbounded growth)
     auto extra = pool.acquire();
-    extra.shouldNotBeNull;
+    extra.shouldBeNull;
+
+    // Release one and verify we can acquire again
+    pool.release(objects[0]);
+    auto reacquired = pool.acquire();
+    reacquired.shouldNotBeNull;
 }
 
 // Test 9: Empty pool acquire works
@@ -354,3 +362,35 @@ unittest
     assert(growth < memBefore * 50, "Memory growth too high");
 }
 */
+
+// Test 16: Double-release detection (debug mode)
+@("double release detection in debug mode")
+unittest
+{
+    auto pool = new ObjectPool!TestObject();
+
+    // Acquire an object
+    auto obj = pool.acquire();
+    obj.shouldNotBeNull;
+    obj.id = 42;
+
+    // Release once (valid)
+    pool.release(obj);
+
+    // In debug mode, double release should trigger assertion
+    // In release mode, this test demonstrates the risk
+    debug
+    {
+        import core.exception : AssertError;
+        import std.exception : assertThrown;
+
+        // Double release should assert (BUG #5 fix)
+        assertThrown!AssertError(pool.release(obj));
+    }
+    else
+    {
+        // In release mode, we can't detect this but document the risk
+        // This is the tradeoff for @nogc performance
+        // Users must ensure they don't double-release
+    }
+}
