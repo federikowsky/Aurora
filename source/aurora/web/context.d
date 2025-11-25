@@ -225,38 +225,9 @@ align(64) struct Context
         {
             response.setHeader("Content-Type", "application/json");
             
-            // Serialize to JSON
-            import std.json : JSONValue, toJSON;
-            import std.traits : isArray, isAssociativeArray;
-            
-            static if (is(T == string))
-            {
-                // String: wrap in quotes
-                response.setBody(`"` ~ data ~ `"`);
-            }
-            else static if (is(T : JSONValue))
-            {
-                // Already JSONValue
-                response.setBody(data.toJSON());
-            }
-            else static if (isArray!T)
-            {
-                // Array: serialize as JSON array
-                auto jsonArray = JSONValue(data);
-                response.setBody(jsonArray.toJSON());
-            }
-            else static if (isAssociativeArray!T)
-            {
-                // AA: serialize as JSON object
-                auto jsonObj = JSONValue(data);
-                response.setBody(jsonObj.toJSON());
-            }
-            else
-            {
-                // Fallback: convert to string
-                import std.conv : to;
-                response.setBody(data.to!string);
-            }
+            // Use fastjsond native serialization
+            import aurora.schema.json : serialize;
+            response.setBody(serialize(data));
         }
     }
 }

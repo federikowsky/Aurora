@@ -14,14 +14,18 @@
         "unit-threaded": "~>2.1.9"
     },
     "libs": [
-        "wire"
+        "wire",
+        "fastjsond",
+        "c++"
     ],
     "importPaths": [
         "source",
-        "lib/wire/source"
+        "lib/wire/source",
+        "lib/fastjsond/source"
     ],
     "lflags": [
-        "-Llib/wire/build"
+        "-Llib/wire/build",
+        "-Llib/fastjsond/build"
     ],
     "configurations": [
         {

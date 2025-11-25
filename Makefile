@@ -17,17 +17,22 @@ WIRE_DIR     := lib/wire
 WIRE_SRC     := $(WIRE_DIR)/source
 WIRE_LIB     := $(WIRE_DIR)/build/libwire.a
 
+# Fastjsond dependency (git submodule in lib/fastjsond)
+FASTJSOND_DIR := lib/fastjsond
+FASTJSOND_SRC := $(FASTJSOND_DIR)/source
+FASTJSOND_LIB := $(FASTJSOND_DIR)/build/libfastjsond.a
+
 # Output
 LIB_NAME     := libaurora.a
 LIB_OUT      := $(BUILD_DIR)/$(LIB_NAME)
 
 # Compiler Flags
-DFLAGS       := -O3 -mcpu=native -I$(SRC_DIR) -I$(WIRE_SRC)
-DFLAGS_DEBUG := -g -I$(SRC_DIR) -I$(WIRE_SRC)
+DFLAGS       := -O3 -mcpu=native -I$(SRC_DIR) -I$(WIRE_SRC) -I$(FASTJSOND_SRC)
+DFLAGS_DEBUG := -g -I$(SRC_DIR) -I$(WIRE_SRC) -I$(FASTJSOND_SRC)
 DFLAGS_LIB   := $(DFLAGS) -lib -oq
 
-# Linker flags for Wire
-LDFLAGS      := -L$(WIRE_DIR)/build -lwire
+# Linker flags for Wire and Fastjsond
+LDFLAGS      := -L$(WIRE_DIR)/build -lwire -L$(FASTJSOND_DIR)/build -lfastjsond -L-lc++
 
 # Source Files (all D files in source/aurora)
 D_SOURCES := $(shell find $(SRC_DIR) -name '*.d')
@@ -70,8 +75,15 @@ check-wire:
 		$(MAKE) -C $(WIRE_DIR) lib; \
 	fi
 
+# Check Fastjsond dependency
+check-fastjsond:
+	@if [ ! -f $(FASTJSOND_LIB) ]; then \
+		echo "Building Fastjsond dependency..."; \
+		$(MAKE) -C $(FASTJSOND_DIR) lib; \
+	fi
+
 # Build static library
-lib: check-wire $(LIB_OUT)
+lib: check-wire check-fastjsond $(LIB_OUT)
 
 $(LIB_OUT): $(D_SOURCES) | $(BUILD_DIR)
 	@echo "[DC] Building library: $@"
@@ -80,20 +92,20 @@ $(LIB_OUT): $(D_SOURCES) | $(BUILD_DIR)
 	@echo "  Size: $$(du -h $@ | cut -f1)"
 
 # Run tests via DUB (unit-threaded needs DUB for dependency resolution)
-test: check-wire
+test: check-wire check-fastjsond
 	@echo "Running tests via DUB..."
 	@dub test
 
 # Build example: decorator_api
 $(BUILD_DIR)/decorator_api: $(EXAMPLES_DIR)/decorator_api.d $(LIB_OUT) | $(BUILD_DIR)
 	@echo "[DC] Building decorator_api..."
-	@$(DC) $(DFLAGS) $< $(LIB_OUT) $(WIRE_LIB) -of=$@ -od=$(BUILD_DIR)
+	@$(DC) $(DFLAGS) $< $(LIB_OUT) $(WIRE_LIB) $(FASTJSOND_LIB) -of=$@ -od=$(BUILD_DIR) -L-lc++
 	@echo "✓ Built: $@"
 
 # Build example: rest_api
 $(BUILD_DIR)/rest_api: $(EXAMPLES_DIR)/rest_api.d $(LIB_OUT) | $(BUILD_DIR)
 	@echo "[DC] Building rest_api..."
-	@$(DC) $(DFLAGS) $< $(LIB_OUT) $(WIRE_LIB) -of=$@ -od=$(BUILD_DIR)
+	@$(DC) $(DFLAGS) $< $(LIB_OUT) $(WIRE_LIB) $(FASTJSOND_LIB) -of=$@ -od=$(BUILD_DIR) -L-lc++
 	@echo "✓ Built: $@"
 
 # Build all examples
@@ -119,6 +131,7 @@ info:
 	@echo "D Flags:       $(DFLAGS)"
 	@echo "Build Dir:     $(BUILD_DIR)"
 	@echo "Wire Dir:      $(WIRE_DIR)"
+	@echo "Fastjsond Dir: $(FASTJSOND_DIR)"
 	@echo ""
 	@echo "Source Files"
 	@echo "============"
