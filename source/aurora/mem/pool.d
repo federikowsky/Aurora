@@ -30,6 +30,14 @@ version(Posix)
 {
     import core.sys.posix.stdlib : posix_memalign;
 }
+else version(Windows)
+{
+    import core.sys.windows.winbase : GetLastError;
+    
+    // Windows aligned memory allocation
+    extern(C) void* _aligned_malloc(size_t size, size_t alignment) @nogc nothrow;
+    extern(C) void _aligned_free(void* ptr) @nogc nothrow;
+}
 
 // Re-export ObjectPool and Arena for convenience
 public import aurora.mem.object_pool;
@@ -312,9 +320,20 @@ class BufferPool
             
             return (cast(ubyte*)ptr)[0 .. size];
         }
+        else version(Windows)
+        {
+            // Windows: use _aligned_malloc for cache-line alignment
+            void* ptr = _aligned_malloc(size, CACHE_LINE_SIZE);
+            
+            if (ptr is null)
+                return null;
+            
+            memset(ptr, 0, size);
+            return (cast(ubyte*)ptr)[0 .. size];
+        }
         else
         {
-            // Windows fallback - use malloc (not aligned)
+            // Fallback - use malloc (not aligned)
             void* ptr = malloc(size);
             
             if (ptr is null)

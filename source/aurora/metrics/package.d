@@ -2,18 +2,24 @@
  * Aurora Metrics System
  * 
  * Features:
- * - Counter (monotonic increment)
- * - Gauge (arbitrary values)
- * - Histogram (value distribution)
- * - Timer (duration tracking)
- * - Thread-safe
+ * - Counter (monotonic increment) - lock-free atomic
+ * - Gauge (arbitrary values) - lock-free atomic
+ * - Histogram (value distribution) - lock-free atomic
+ * - Timer (duration tracking) - RAII-based
+ * - Thread-local metric caching for hot-path performance
+ * - Double-checked locking singleton
  * - Export to JSON/Prometheus
+ * 
+ * Architecture:
+ * - Metric objects use atomic operations (lock-free hot path)
+ * - Registry uses synchronized only for metric creation (cold path)
+ * - Thread-local cache avoids repeated hash lookups
  * 
  * Usage:
  * ---
  * auto metrics = Metrics.get();
  * auto counter = metrics.counter("requests_total", "method", "GET");
- * counter.inc();
+ * counter.inc();  // Lock-free!
  * ---
  */
 module aurora.metrics;
@@ -216,96 +222,189 @@ class Timer
 
 /**
  * Metrics - singleton metrics registry
+ * 
+ * Uses double-checked locking for singleton and thread-local caching
+ * to minimize lock contention on hot paths.
  */
 class Metrics
 {
-    private static Metrics instance;
+    // Double-checked locking singleton
+    private __gshared Metrics instance;
+    private __gshared bool instanceCreated = false;
     private static Mutex instanceMutex;
     
-    private Counter[string] counters;
-    private Gauge[string] gauges;
-    private Histogram[string] histograms;
-    private Timer[string] timers;
-    private Mutex metricsMutex;
+    // Thread-local cache for fast metric access
+    private static Counter[string] tlCounterCache;
+    private static Gauge[string] tlGaugeCache;
+    private static Histogram[string] tlHistogramCache;
+    private static Timer[string] tlTimerCache;
+    
+    // Global metric storage (accessed under lock only for creation)
+    private __gshared Counter[string] counters;
+    private __gshared Gauge[string] gauges;
+    private __gshared Histogram[string] histograms;
+    private __gshared Timer[string] timers;
+    private __gshared Mutex metricsMutex;
     
     static this()
     {
         instanceMutex = new Mutex();
     }
     
-    static Metrics get()
+    /**
+     * Get singleton instance (double-checked locking)
+     */
+    static Metrics get() @trusted
     {
+        // Fast path: already created
+        if (atomicLoad(instanceCreated))
+            return instance;
+        
+        // Slow path: create under lock
         synchronized (instanceMutex)
         {
-            if (instance is null)
+            if (!atomicLoad(instanceCreated))
             {
                 instance = new Metrics();
+                atomicStore(instanceCreated, true);
             }
-            return instance;
         }
+        return instance;
     }
     
-    private this()
+    private this() @trusted
     {
         metricsMutex = new Mutex();
     }
     
+    /**
+     * Get or create a counter.
+     * Uses thread-local cache for hot path performance.
+     */
     Counter counter(T...)(string name, T labelPairs)
     {
         auto key = makeKey(name, labelPairs);
         
+        // Fast path: check thread-local cache
+        if (auto cached = key in tlCounterCache)
+            return *cached;
+        
+        // Slow path: check global registry (under lock)
+        Counter result;
         synchronized (metricsMutex)
         {
-            if (key !in counters)
+            if (auto existing = key in counters)
             {
-                counters[key] = new Counter(name, makeLabels(labelPairs));
+                result = *existing;
             }
-            return counters[key];
+            else
+            {
+                result = new Counter(name, makeLabels(labelPairs));
+                counters[key] = result;
+            }
         }
+        
+        // Cache for future use
+        tlCounterCache[key] = result;
+        return result;
     }
     
+    /**
+     * Get or create a gauge.
+     * Uses thread-local cache for hot path performance.
+     */
     Gauge gauge(T...)(string name, T labelPairs)
     {
         auto key = makeKey(name, labelPairs);
         
+        // Fast path: check thread-local cache
+        if (auto cached = key in tlGaugeCache)
+            return *cached;
+        
+        // Slow path: check global registry
+        Gauge result;
         synchronized (metricsMutex)
         {
-            if (key !in gauges)
+            if (auto existing = key in gauges)
             {
-                gauges[key] = new Gauge(name, makeLabels(labelPairs));
+                result = *existing;
             }
-            return gauges[key];
+            else
+            {
+                result = new Gauge(name, makeLabels(labelPairs));
+                gauges[key] = result;
+            }
         }
+        
+        tlGaugeCache[key] = result;
+        return result;
     }
     
+    /**
+     * Get or create a histogram.
+     * Uses thread-local cache for hot path performance.
+     */
     Histogram histogram(T...)(string name, T labelPairs)
     {
         auto key = makeKey(name, labelPairs);
         
+        // Fast path: check thread-local cache
+        if (auto cached = key in tlHistogramCache)
+            return *cached;
+        
+        // Slow path: check global registry
+        Histogram result;
         synchronized (metricsMutex)
         {
-            if (key !in histograms)
+            if (auto existing = key in histograms)
             {
-                histograms[key] = new Histogram(name, makeLabels(labelPairs));
+                result = *existing;
             }
-            return histograms[key];
+            else
+            {
+                result = new Histogram(name, makeLabels(labelPairs));
+                histograms[key] = result;
+            }
         }
+        
+        tlHistogramCache[key] = result;
+        return result;
     }
     
+    /**
+     * Get or create a timer.
+     * Uses thread-local cache for hot path performance.
+     */
     Timer timer(T...)(string name, T labelPairs)
     {
         auto key = makeKey(name, labelPairs);
         
+        // Fast path: check thread-local cache
+        if (auto cached = key in tlTimerCache)
+            return *cached;
+        
+        // Slow path: check global registry
+        Timer result;
         synchronized (metricsMutex)
         {
-            if (key !in timers)
+            if (auto existing = key in timers)
             {
-                timers[key] = new Timer(name, makeLabels(labelPairs));
+                result = *existing;
             }
-            return timers[key];
+            else
+            {
+                result = new Timer(name, makeLabels(labelPairs));
+                timers[key] = result;
+            }
         }
+        
+        tlTimerCache[key] = result;
+        return result;
     }
     
+    /**
+     * Collect all metric names.
+     */
     string[] collect()
     {
         synchronized (metricsMutex)
@@ -313,52 +412,39 @@ class Metrics
             string[] result;
             
             foreach (key; counters.byKey)
-            {
                 result ~= key;
-            }
             
             foreach (key; gauges.byKey)
-            {
                 result ~= key;
-            }
             
             foreach (key; histograms.byKey)
-            {
                 result ~= key;
-            }
             
             foreach (key; timers.byKey)
-            {
                 result ~= key;
-            }
             
             return result;
         }
     }
     
+    /**
+     * Reset all metrics.
+     */
     void reset()
     {
         synchronized (metricsMutex)
         {
             foreach (counter; counters)
-            {
                 counter.reset();
-            }
             
             foreach (gauge; gauges)
-            {
                 gauge.reset();
-            }
             
             foreach (hist; histograms)
-            {
                 hist.reset();
-            }
             
             foreach (timer; timers)
-            {
                 timer.reset();
-            }
         }
     }
     

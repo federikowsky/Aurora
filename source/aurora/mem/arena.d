@@ -30,6 +30,12 @@ version(Posix)
 {
     import core.sys.posix.stdlib : posix_memalign;
 }
+else version(Windows)
+{
+    // Windows aligned memory allocation
+    extern(C) void* _aligned_malloc(size_t size, size_t alignment) @nogc nothrow;
+    extern(C) void _aligned_free(void* ptr) @nogc nothrow;
+}
 
 /**
  * Arena allocator - bump allocator with reset.
@@ -200,9 +206,20 @@ class Arena
             
             return (cast(ubyte*)ptr)[0 .. size];
         }
+        else version(Windows)
+        {
+            // Windows: use _aligned_malloc for cache-line alignment
+            void* ptr = _aligned_malloc(size, CACHE_LINE_SIZE);
+            
+            if (ptr is null)
+                return null;
+            
+            memset(ptr, 0, size);
+            return (cast(ubyte*)ptr)[0 .. size];
+        }
         else
         {
-            // Windows: use malloc
+            // Fallback: use malloc
             void* ptr = malloc(size);
             
             if (ptr is null)
@@ -237,9 +254,20 @@ class Arena
             
             memset(ptr, 0, size);
         }
+        else version(Windows)
+        {
+            // Windows: use _aligned_malloc
+            size_t actualAlignment = alignment < CACHE_LINE_SIZE ? CACHE_LINE_SIZE : alignment;
+            ptr = _aligned_malloc(size, actualAlignment);
+            
+            if (ptr is null)
+                return null;
+            
+            memset(ptr, 0, size);
+        }
         else
         {
-            // Windows: use malloc (not aligned)
+            // Fallback: use malloc (not aligned)
             ptr = malloc(size);
             
             if (ptr is null)

@@ -18,10 +18,10 @@
     ],
     "importPaths": [
         "source",
-        "/Users/federicofilippi/Desktop/D/Wire/source"
+        "lib/wire/source"
     ],
     "lflags": [
-        "-L/Users/federicofilippi/Desktop/D/Wire/build"
+        "-Llib/wire/build"
     ],
     "configurations": [
         {
@@ -82,6 +82,19 @@
             "targetType": "executable",
             "targetName": "unified_test",
             "mainSourceFile": "examples/unified_test.d",
+            "sourcePaths": [
+                "source"
+            ],
+            "importPaths": [
+                "source",
+                "/Users/federicofilippi/Desktop/D/Wire/source"
+            ]
+        },
+        {
+            "name": "mt-test",
+            "targetType": "executable",
+            "targetName": "mt_test",
+            "mainSourceFile": "examples/mt_test.d",
             "sourcePaths": [
                 "source"
             ],

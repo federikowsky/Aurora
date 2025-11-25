@@ -1,0 +1,3 @@
+[submodule "lib/wire"]
+	path = lib/wire
+	url = https://github.com/federikowsky/Wire.git
