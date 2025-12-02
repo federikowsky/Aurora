@@ -59,6 +59,9 @@ void main(string[] args)
     
     app = new App(config);
     
+    // Colored logging for request details
+    app.useLogger();
+    
     // === SAME ENDPOINTS AS MULTI-CORE ===
     
     app.get("/", (ref Context ctx) {

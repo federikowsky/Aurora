@@ -232,25 +232,33 @@ private class WorkerThread
     private RequestHandler handler;
     private Router router;
     private MiddlewarePipeline pipeline;
+    private ServerConfig* config;  // Reference to server config
     
     // Stats
     shared ulong requestsProcessed;
     shared ulong bytesReceived;
     shared ulong bytesSent;
     shared ulong errors;
+    shared ulong rejectedHeadersTooLarge;
+    shared ulong rejectedBodyTooLarge;
+    shared ulong rejectedTimeout;
     
-    this(uint workerId, ConnectionQueue* q, RequestHandler h, Router r, MiddlewarePipeline p) @safe
+    this(uint workerId, ConnectionQueue* q, RequestHandler h, Router r, MiddlewarePipeline p, ServerConfig* cfg) @safe
     {
         this.id = workerId;
         this.queue = q;
         this.handler = h;
         this.router = r;
         this.pipeline = p;
+        this.config = cfg;
         atomicStore(running, false);
         atomicStore(requestsProcessed, 0);
         atomicStore(bytesReceived, 0);
         atomicStore(bytesSent, 0);
         atomicStore(errors, 0);
+        atomicStore(rejectedHeadersTooLarge, 0);
+        atomicStore(rejectedBodyTooLarge, 0);
+        atomicStore(rejectedTimeout, 0);
     }
     
     void start() @trusted
@@ -293,31 +301,98 @@ private class WorkerThread
     {
         scope(exit) closeSocket(conn);
         
-        ubyte[8192] buffer;
+        // Use dynamic buffer based on maxHeaderSize config
+        auto maxHeader = config ? config.maxHeaderSize : 64 * 1024;
+        auto maxBody = config ? config.maxBodySize : 10 * 1024 * 1024;
+        auto readTimeout = config ? config.readTimeout : 30.seconds;
+        auto writeTimeout = config ? config.writeTimeout : 30.seconds;
+        auto keepAliveTimeout = config ? config.keepAliveTimeout : 120.seconds;
+        auto maxRequests = config ? config.maxRequestsPerConnection : 1000;
+        
+        // Initial buffer for headers (8KB, will grow if needed)
+        ubyte[] buffer = new ubyte[8192];
+        uint requestCount = 0;
         
         try
         {
-            // Set socket options
+            // Set socket options from config
             conn.blocking = true;
-            conn.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, 30.seconds);
-            conn.setOption(SocketOptionLevel.SOCKET, SocketOption.SNDTIMEO, 30.seconds);
+            conn.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, readTimeout);
+            conn.setOption(SocketOptionLevel.SOCKET, SocketOption.SNDTIMEO, writeTimeout);
             
             // Keep-alive loop
             while (atomicLoad(running))
             {
-                // Read request
-                auto received = conn.receive(buffer[]);
+                // Check max requests per connection
+                if (maxRequests > 0 && requestCount >= maxRequests)
+                {
+                    sendError(conn, 200, "OK", true);  // Close gracefully
+                    break;
+                }
                 
-                if (received <= 0)
-                    break;  // Connection closed or error
+                // Read request with header size limit
+                size_t totalReceived = 0;
+                bool headersComplete = false;
+                size_t headerEndPos = 0;
                 
-                atomicOp!"+="(bytesReceived, received);
+                while (!headersComplete && totalReceived < maxHeader)
+                {
+                    // Grow buffer if needed
+                    if (totalReceived >= buffer.length)
+                    {
+                        if (buffer.length >= maxHeader)
+                        {
+                            // Headers too large
+                            atomicOp!"+="(rejectedHeadersTooLarge, 1);
+                            sendError(conn, 431, "Request Header Fields Too Large");
+                            return;
+                        }
+                        // Double buffer size
+                        auto newBuf = new ubyte[min(buffer.length * 2, maxHeader)];
+                        newBuf[0..totalReceived] = buffer[0..totalReceived];
+                        buffer = newBuf;
+                    }
+                    
+                    auto received = conn.receive(buffer[totalReceived..$]);
+                    
+                    if (received <= 0)
+                    {
+                        if (totalReceived == 0)
+                            return;  // Clean close, no data
+                        // Timeout or error mid-request
+                        atomicOp!"+="(rejectedTimeout, 1);
+                        return;
+                    }
+                    
+                    totalReceived += received;
+                    atomicOp!"+="(bytesReceived, received);
+                    
+                    // Check for end of headers (\r\n\r\n)
+                    for (size_t i = (totalReceived > 4 ? totalReceived - received - 3 : 0); i + 3 < totalReceived; i++)
+                    {
+                        if (buffer[i] == '\r' && buffer[i+1] == '\n' && 
+                            buffer[i+2] == '\r' && buffer[i+3] == '\n')
+                        {
+                            headersComplete = true;
+                            headerEndPos = i + 4;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!headersComplete)
+                {
+                    // Headers exceeded max size
+                    atomicOp!"+="(rejectedHeadersTooLarge, 1);
+                    sendError(conn, 431, "Request Header Fields Too Large");
+                    return;
+                }
                 
                 // Parse HTTP request
                 HTTPRequest request;
                 try
                 {
-                    request = HTTPRequest.parse(buffer[0..received]);
+                    request = HTTPRequest.parse(buffer[0..totalReceived]);
                 }
                 catch (Exception)
                 {
@@ -331,6 +406,24 @@ private class WorkerThread
                     break;
                 }
                 
+                // Check Content-Length against maxBodySize
+                auto contentLengthStr = request.getHeader("content-length");
+                if (contentLengthStr.length > 0)
+                {
+                    try
+                    {
+                        auto contentLength = contentLengthStr.to!size_t;
+                        if (contentLength > maxBody)
+                        {
+                            atomicOp!"+="(rejectedBodyTooLarge, 1);
+                            sendError(conn, 413, "Payload Too Large");
+                            return;
+                        }
+                    }
+                    catch (Exception) {}
+                }
+                
+                requestCount++;
                 atomicOp!"+="(requestsProcessed, 1);
                 
                 // Handle request
@@ -370,6 +463,9 @@ private class WorkerThread
                     break;
                 if (request.httpVersion() == "HTTP/1.0" && connHeader != "keep-alive")
                     break;
+                
+                // Set keep-alive timeout for next request
+                conn.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, keepAliveTimeout);
             }
         }
         catch (Exception e)
@@ -440,7 +536,7 @@ private class WorkerThread
         return cast(ubyte[])"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n".dup;
     }
     
-    private void sendError(Socket conn, int code, string message) @trusted nothrow
+    private void sendError(Socket conn, int code, string message, bool keepAlive = false) @trusted nothrow
     {
         try
         {
@@ -469,7 +565,7 @@ private class WorkerThread
                 code, 
                 "application/json", 
                 cast(string)bodyBuf[0..bodyLen],
-                false  // Connection: close
+                keepAlive  // Connection: keep-alive or close
             );
             
             if (len > 0)
@@ -545,6 +641,26 @@ struct ServerConfig
     uint listenBacklog = 1024;
     bool debugMode = false;
     
+    // === Security Limits (Production Ready) ===
+    
+    /// Maximum header size in bytes (default 64KB, prevents header DoS)
+    uint maxHeaderSize = 64 * 1024;
+    
+    /// Maximum body size in bytes (default 10MB, prevents memory exhaustion)
+    size_t maxBodySize = 10 * 1024 * 1024;
+    
+    /// Read timeout - max time to wait for client data (prevents slowloris)
+    Duration readTimeout = 30.seconds;
+    
+    /// Write timeout - max time to send response
+    Duration writeTimeout = 30.seconds;
+    
+    /// Keep-alive timeout - max idle time before closing connection
+    Duration keepAliveTimeout = 120.seconds;
+    
+    /// Maximum requests per connection (0 = unlimited)
+    uint maxRequestsPerConnection = 1000;
+    
     static ServerConfig defaults() @safe nothrow
     {
         return ServerConfig.init;
@@ -571,6 +687,7 @@ final class Server
     private ServerConfig config;
     private Socket listenSocket;
     private shared bool running;
+    private shared bool shuttingDown;  // Graceful shutdown in progress
     
     private WorkerThread[] workers;
     private ConnectionQueue[] queues;
@@ -582,6 +699,7 @@ final class Server
     
     // Stats
     private shared ulong totalConnections;
+    private shared ulong rejectedDuringShutdown;
     
     /// Create with router
     this(Router r, ServerConfig cfg = ServerConfig.defaults()) @safe
@@ -591,7 +709,9 @@ final class Server
         this.handler = null;
         this.config = cfg;
         atomicStore(running, false);
+        atomicStore(shuttingDown, false);
         atomicStore(totalConnections, 0);
+        atomicStore(rejectedDuringShutdown, 0);
     }
     
     /// Create with router and middleware pipeline
@@ -602,7 +722,9 @@ final class Server
         this.handler = null;
         this.config = cfg;
         atomicStore(running, false);
+        atomicStore(shuttingDown, false);
         atomicStore(totalConnections, 0);
+        atomicStore(rejectedDuringShutdown, 0);
     }
     
     /// Create with simple handler
@@ -613,7 +735,9 @@ final class Server
         this.handler = h;
         this.config = cfg;
         atomicStore(running, false);
+        atomicStore(shuttingDown, false);
         atomicStore(totalConnections, 0);
+        atomicStore(rejectedDuringShutdown, 0);
     }
     
     /// Start the server (blocking)
@@ -634,7 +758,7 @@ final class Server
         foreach (i; 0 .. numWorkers)
         {
             queues[i].initialize(config.connectionQueueSize);
-            workers[i] = new WorkerThread(cast(uint)i, &queues[i], handler, router, pipeline);
+            workers[i] = new WorkerThread(cast(uint)i, &queues[i], handler, router, pipeline, &config);
         }
         
         // Start workers
@@ -685,9 +809,10 @@ final class Server
         }
     }
     
-    /// Stop the server
+    /// Stop the server (immediate)
     void stop() @trusted nothrow
     {
+        atomicStore(shuttingDown, true);
         atomicStore(running, false);
         
         // Close all queues to wake up blocked workers
@@ -702,9 +827,54 @@ final class Server
         catch (Exception) {}
     }
     
+    /// Graceful shutdown - stop accepting, wait for in-flight requests
+    void gracefulStop(Duration timeout = 30.seconds) @trusted
+    {
+        import core.time : MonoTime;
+        
+        // Mark as shutting down (health checks should return 503)
+        atomicStore(shuttingDown, true);
+        
+        // Stop accepting new connections
+        try
+        {
+            if (listenSocket !is null)
+                listenSocket.close();
+        }
+        catch (Exception) {}
+        
+        // Wait for queues to drain (with timeout)
+        auto deadline = MonoTime.currTime + timeout;
+        
+        while (MonoTime.currTime < deadline)
+        {
+            ulong pending = 0;
+            foreach (ref q; queues)
+                pending += q.length();
+            
+            if (pending == 0)
+                break;
+            
+            Thread.sleep(10.msecs);
+        }
+        
+        // Now fully stop
+        atomicStore(running, false);
+        
+        foreach (ref q; queues)
+            q.close();
+        
+        foreach (w; workers)
+            w.stop();
+        
+        foreach (w; workers)
+            w.join();
+    }
+    
     private void shutdown() @trusted
     {
         // Signal stop
+        atomicStore(shuttingDown, true);
         atomicStore(running, false);
         
         // Close all queues to wake up blocked workers
@@ -720,11 +890,18 @@ final class Server
             w.join();
     }
     
-    /// Get stats
-    ulong getConnections() @safe nothrow { return atomicLoad(totalConnections); }
+    // ========================================
+    // Public Stats & Status
+    // ========================================
     
     /// Check if server is running
     bool isRunning() @safe nothrow { return atomicLoad(running); }
+    
+    /// Check if server is shutting down (for health checks)
+    bool isShuttingDown() @safe nothrow { return atomicLoad(shuttingDown); }
+    
+    /// Get total connections accepted
+    ulong getConnections() @safe nothrow { return atomicLoad(totalConnections); }
     
     /// Get active connections (estimated - queue sizes)
     ulong getActiveConnections() @trusted nothrow
@@ -735,6 +912,7 @@ final class Server
         return total;
     }
     
+    /// Get total requests processed
     ulong getRequests() @trusted nothrow
     {
         ulong total = 0;
@@ -743,11 +921,45 @@ final class Server
         return total;
     }
     
+    /// Get total errors
     ulong getErrors() @trusted nothrow
     {
         ulong total = 0;
         foreach (w; workers)
             total += atomicLoad(w.errors);
         return total;
+    }
+    
+    /// Get rejected requests (header too large)
+    ulong getRejectedHeadersTooLarge() @trusted nothrow
+    {
+        ulong total = 0;
+        foreach (w; workers)
+            total += atomicLoad(w.rejectedHeadersTooLarge);
+        return total;
+    }
+    
+    /// Get rejected requests (body too large)
+    ulong getRejectedBodyTooLarge() @trusted nothrow
+    {
+        ulong total = 0;
+        foreach (w; workers)
+            total += atomicLoad(w.rejectedBodyTooLarge);
+        return total;
+    }
+    
+    /// Get rejected requests (timeout)
+    ulong getRejectedTimeout() @trusted nothrow
+    {
+        ulong total = 0;
+        foreach (w; workers)
+            total += atomicLoad(w.rejectedTimeout);
+        return total;
+    }
+    
+    /// Get rejected during shutdown
+    ulong getRejectedDuringShutdown() @safe nothrow 
+    { 
+        return atomicLoad(rejectedDuringShutdown); 
     }
 }

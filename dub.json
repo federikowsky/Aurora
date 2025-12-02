@@ -52,7 +52,8 @@
             "mainSourceFile": "tests/runner.d",
             "excludedSourceFiles": [
                 "tests/unit/web/middleware.disabled/*",
-                "tests/unit/runtime/*"
+                "tests/realworld/*",
+                "tests/stress/*"
             ],
             "dflags": [
                 "-unittest"
@@ -106,6 +107,15 @@
                 "source",
                 "/Users/federicofilippi/Desktop/D/Wire/source"
             ]
+        },
+        {
+            "name": "test-server",
+            "targetType": "executable",
+            "targetName": "test_server",
+            "mainSourceFile": "tests/integration/test_server.d",
+            "sourceFiles": ["tests/integration/test_server.d"],
+            "excludedSourceFiles": ["source/**/*", "tests/**/*"],
+            "importPaths": ["source"]
         }
     ],
     "buildTypes": {
