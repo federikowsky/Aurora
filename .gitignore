@@ -51,11 +51,6 @@ Thumbs.db
 # Docs
 # docs/*
 # !docs/specs.md# Ignore compiled examples
-examples/api_gateway
-examples/file_server
-examples/microservice
-examples/middleware_example
-examples/rest_api
-examples/router_api
 tests/realworld/multicore_server
 tests/realworld/singlecore_server
+build/

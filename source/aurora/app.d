@@ -128,6 +128,16 @@ class App
         return this;
     }
     
+    /// Add Gin-style request logger (convenience method)
+    App useLogger(bool colored = true)
+    {
+        import aurora.web.middleware.logger;
+        auto logger = new LoggerMiddleware();
+        logger.format = LogFormat.COLORED;
+        logger.useColors = colored;
+        return this.use(logger);
+    }
+    
     // ========================================
     // CONFIGURATION
     // ========================================
