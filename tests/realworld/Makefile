@@ -1,5 +1,5 @@
 # Real-World Tests Makefile
-# Uses pre-built Aurora library
+# Uses pre-built Aurora library from main build
 
 DC       := ldc2
 AURORA   := ../..
@@ -10,25 +10,40 @@ WIRE_LIB := $(AURORA)/lib/wire/build/libwire.a
 FASTJSOND_SRC := $(AURORA)/lib/fastjsond/source
 FASTJSOND_LIB := $(AURORA)/lib/fastjsond/build/libfastjsond.a
 
-# Compile flags
-# Note: -lowmem reduces memory usage during compilation
-DFLAGS   := -O2 -I$(SRC) -I$(WIRE_SRC) -I$(FASTJSOND_SRC) -lowmem
+# Compile flags - uses -O3 for maximum performance
+# NOTE: Large CTFE buffers were moved to runtime init to avoid OOM
+CFLAGS   := -c -O3 -mcpu=native -release -I$(SRC) -I$(WIRE_SRC) -I$(FASTJSOND_SRC)
 LDFLAGS  := $(BUILD)/libaurora.a $(WIRE_LIB) $(FASTJSOND_LIB) -L-lc++
 
 # Test sources and targets (auto-discovered)
 TEST_SOURCES := $(wildcard *_server.d)
 TEST_TARGETS := $(patsubst %.d,%,$(TEST_SOURCES))
+TEST_OBJECTS := $(patsubst %.d,%.o,$(TEST_SOURCES))
 
-.PHONY: all clean servers test
+.PHONY: all clean servers test fast lib
 
-all: servers
+# Default: ensure lib is built first, then servers
+all: lib servers
+
+# Build Aurora library first (delegates to main Makefile)
+lib:
+	@$(MAKE) -C $(AURORA) lib
 
 servers: $(TEST_TARGETS)
 
-# Pattern rule: build any server from *_server.d
-%: %.d
-	@echo "[DC] $@ (lowmem mode)"
-	@$(DC) $(DFLAGS) $< $(LDFLAGS) -of=$@
+# Two-step build: compile then link
+%.o: %.d
+	@echo "[DC] Compiling $<..."
+	@$(DC) $(CFLAGS) $< -of=$@
+
+%: %.o $(BUILD)/libaurora.a
+	@echo "[LD] Linking $@..."
+	@$(DC) $< $(LDFLAGS) -of=$@
+	@echo "    ✓ $@"
+
+# Fast build (no optimization)
+fast: CFLAGS := -c -O0 -I$(SRC) -I$(WIRE_SRC) -I$(FASTJSOND_SRC)
+fast: $(TEST_TARGETS)
 
 clean:
 	rm -f $(TEST_TARGETS) *.o

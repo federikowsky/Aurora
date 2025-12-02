@@ -15,6 +15,23 @@ import std.conv : to;
 
 __gshared App app;
 
+// Pre-allocated response payloads (runtime init to avoid CTFE OOM)
+private __gshared string smallPayload;   // 1KB
+private __gshared string mediumPayload;  // 64KB
+private __gshared string largePayload;   // 512KB
+
+shared static this()
+{
+    char[1024] s = 'x';
+    smallPayload = cast(string)s.idup;
+    
+    char[65536] m = 'M';
+    mediumPayload = cast(string)m.idup;
+    
+    char[512 * 1024] l = 'L';
+    largePayload = cast(string)l.idup;
+}
+
 extern(C) void handleSignal(int sig) nothrow @nogc @system
 {
     exit(0);
@@ -55,29 +72,16 @@ void main(string[] args)
     
     // Small response (1KB)
     app.get("/small", (ref Context ctx) {
-        // Pre-allocated 1KB response
-        static immutable smallPayload = () {
-            char[1024] buf = 'x';
-            return cast(string)buf.idup;
-        }();
         ctx.send(smallPayload);
     });
     
     // Medium response (64KB)
     app.get("/medium", (ref Context ctx) {
-        static immutable mediumPayload = () {
-            char[65536] buf = 'M';
-            return cast(string)buf.idup;
-        }();
         ctx.send(mediumPayload);
     });
     
     // Large response (512KB)
     app.get("/large", (ref Context ctx) {
-        static immutable largePayload = () {
-            char[512 * 1024] buf = 'L';
-            return cast(string)buf.idup;
-        }();
         ctx.send(largePayload);
     });
     
