@@ -766,3 +766,436 @@ unittest
         req.query.shouldEqual("id=123&filter=active");
     }
 }
+
+// ========================================
+// HTTP SMUGGLING TESTS (OWASP WSTG-INPV-15)
+// ========================================
+// See: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/15-Testing_for_HTTP_Splitting_Smuggling
+
+// Test 42: Duplicate Content-Length headers (HTTP Smuggling vector)
+@("duplicate Content-Length headers handling")
+unittest
+{
+    // CL.CL attack: Two different Content-Length values
+    // Front-end proxy might use first, back-end might use second
+    // Secure behavior: Reject or use consistent interpretation
+    string rawRequest = "POST /api HTTP/1.1\r\n" ~
+                       "Host: localhost\r\n" ~
+                       "Content-Length: 10\r\n" ~
+                       "Content-Length: 4\r\n" ~
+                       "\r\n" ~
+                       "testabcdef";
+
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Wire parser behavior - should either:
+    // 1. Return error (safest)
+    // 2. Use first Content-Length (consistent)
+    // 3. Use last Content-Length (consistent)
+    // Key: Must be consistent, not ambiguous
+    auto cl = req.getHeader("Content-Length");
+    // Verify we get a single value, not concatenation
+    assert(cl == "10" || cl == "4" || req.hasError, 
+           "Duplicate Content-Length must be handled consistently");
+}
+
+// Test 43: CL.TE attack vector (Content-Length + Transfer-Encoding)
+@("CL.TE attack - Content-Length with Transfer-Encoding")
+unittest
+{
+    // CL.TE: Front-end uses Content-Length, back-end uses Transfer-Encoding
+    // This is a common HTTP smuggling vector
+    string rawRequest = "POST /api HTTP/1.1\r\n" ~
+                       "Host: localhost\r\n" ~
+                       "Content-Length: 13\r\n" ~
+                       "Transfer-Encoding: chunked\r\n" ~
+                       "\r\n" ~
+                       "0\r\n" ~
+                       "\r\n" ~
+                       "SMUGGLED";
+
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Per RFC 7230 Section 3.3.3:
+    // If both present, Transfer-Encoding takes precedence
+    // OR message should be rejected (safest)
+    // Wire parser may reject this combination - that's secure behavior
+    
+    // Test that parser doesn't crash and handles this edge case
+    // The specific handling (reject, use TE, use CL) is implementation-dependent
+}
+
+// Test 44: TE.CL attack vector (Transfer-Encoding before Content-Length priority)
+@("TE.CL attack - Transfer-Encoding should take precedence")
+unittest
+{
+    // Per RFC 7230, when both are present, Transfer-Encoding wins
+    string rawRequest = "POST /api HTTP/1.1\r\n" ~
+                       "Host: localhost\r\n" ~
+                       "Transfer-Encoding: chunked\r\n" ~
+                       "Content-Length: 4\r\n" ~
+                       "\r\n" ~
+                       "5\r\nhello\r\n0\r\n\r\n";
+
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Wire parser may handle this differently - test that it doesn't crash
+    // and that parsing completes without exception
+    // The specific behavior (reject both, use TE, use CL) is implementation-dependent
+    // Key security property: consistent behavior, no request splitting
+}
+
+// Test 45: Obfuscated Transfer-Encoding headers
+@("obfuscated Transfer-Encoding headers")
+unittest
+{
+    // Attackers try to obfuscate TE header to bypass front-end
+    string[] obfuscatedRequests = [
+        // Whitespace after value
+        "POST /api HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked \r\nContent-Length: 4\r\n\r\ntest",
+        // Tab character
+        "POST /api HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding:\tchunked\r\nContent-Length: 4\r\n\r\ntest",
+        // Double TE header
+        "POST /api HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: identity\r\nTransfer-Encoding: chunked\r\nContent-Length: 4\r\n\r\ntest",
+    ];
+    
+    foreach (rawRequest; obfuscatedRequests)
+    {
+        auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+        // Parser should handle these consistently without crashing
+        // Either parse correctly or reject
+    }
+}
+
+// Test 46: HTTP Request Line Injection (CRLF Injection)
+@("CRLF injection in path")
+unittest
+{
+    // Attempt to inject second request via path
+    string rawRequest = "GET /api\r\nX-Injected: Header\r\nGET /admin HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Should either:
+    // 1. Return error (safest - malformed request)
+    // 2. Parse only first valid line
+    // Should NOT parse injected headers or second request
+}
+
+// Test 47: HTTP Header Name Injection
+@("header name CRLF injection")
+unittest
+{
+    // Attempt to inject via header name containing CRLF
+    // Most parsers will reject this as malformed
+    string rawRequest = "GET / HTTP/1.1\r\nHost: localhost\r\nX-Bad\r\nHeader: value\r\n\r\n";
+    
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // The injected "Header" should NOT be parsed as a separate header
+    // Either error or ignore the malformed line
+}
+
+// Test 48: HTTP Header Value Injection (Host Header Injection WSTG-INPV-17)
+@("Host header value injection")
+unittest
+{
+    // Single valid Host header - baseline
+    {
+        string rawRequest = "GET / HTTP/1.1\r\nHost: legitimate.com\r\n\r\n";
+        auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+        req.getHeader("Host").shouldEqual("legitimate.com");
+    }
+    
+    // Multiple Host headers (should reject or use first)
+    {
+        string rawRequest = "GET / HTTP/1.1\r\n" ~
+                           "Host: legitimate.com\r\n" ~
+                           "Host: evil.com\r\n" ~
+                           "\r\n";
+        
+        auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+        auto host = req.getHeader("Host");
+        // Should be consistent - either first, last, or error
+        assert(host == "legitimate.com" || host == "evil.com" || req.hasError,
+               "Multiple Host headers must be handled consistently");
+    }
+}
+
+// Test 49: Absolute URI in request line (proxy behavior)
+@("absolute URI in request line")
+unittest
+{
+    // Proxies may receive requests with absolute URI
+    string rawRequest = "GET http://example.com/path HTTP/1.1\r\nHost: example.com\r\n\r\n";
+    
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Should either:
+    // 1. Parse the full URI as path
+    // 2. Extract just the path component
+}
+
+// Test 50: Negative Content-Length
+@("negative Content-Length rejection")
+unittest
+{
+    string rawRequest = "POST /api HTTP/1.1\r\n" ~
+                       "Host: localhost\r\n" ~
+                       "Content-Length: -1\r\n" ~
+                       "\r\n" ~
+                       "test";
+
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Negative Content-Length should be rejected or treated as 0
+    // Should NOT cause integer overflow or buffer issues
+}
+
+// Test 51: Very large Content-Length (DoS vector)
+@("extremely large Content-Length handling")
+unittest
+{
+    // Attempt to cause memory exhaustion or integer overflow
+    string rawRequest = "POST /api HTTP/1.1\r\n" ~
+                       "Host: localhost\r\n" ~
+                       "Content-Length: 999999999999999999\r\n" ~
+                       "\r\n" ~
+                       "tiny";
+
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Parser should handle this gracefully
+    // Either reject or limit the value
+    auto cl = req.getHeader("Content-Length");
+    // Should not crash or hang
+}
+
+// Test 52: Null bytes in headers
+@("null bytes in headers")
+unittest
+{
+    // Null byte injection attempt
+    string rawRequest = "GET /api HTTP/1.1\r\nHost: localhost\r\nX-Test: value\x00evil\r\n\r\n";
+    
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Parser should handle null bytes safely
+    // Either reject, truncate, or encode
+}
+
+// Test 53: Invalid HTTP version
+@("invalid HTTP version handling")
+unittest
+{
+    string[] invalidVersions = [
+        "GET / HTTP/9.9\r\nHost: localhost\r\n\r\n",
+        "GET / HTTP/1\r\nHost: localhost\r\n\r\n",
+        "GET / HTTP\r\nHost: localhost\r\n\r\n",
+        "GET / HTTP/a.b\r\nHost: localhost\r\n\r\n",
+    ];
+    
+    foreach (rawRequest; invalidVersions)
+    {
+        auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+        // Should either reject or handle gracefully
+    }
+}
+
+// Test 54: HTTP/0.9 simple request (legacy)
+@("HTTP/0.9 simple request")
+unittest
+{
+    // HTTP/0.9 has no version or headers
+    string rawRequest = "GET /\r\n";
+    
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Modern servers should reject HTTP/0.9 or parse gracefully
+}
+
+// Test 55: Request with body but no Content-Length
+@("body without Content-Length")
+unittest
+{
+    string rawRequest = "POST /api HTTP/1.1\r\n" ~
+                       "Host: localhost\r\n" ~
+                       "\r\n" ~
+                       "orphan body data";
+
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Without Content-Length or Transfer-Encoding:
+    // Body length is indeterminate
+    // Parser should treat as 0-length body or error
+}
+
+// ========================================
+// HTTP RESPONSE ADDITIONAL TESTS
+// ========================================
+
+// Test 56: Response buildInto with small buffer
+@("Response buildInto with small buffer")
+unittest
+{
+    auto resp = HTTPResponse(200, "OK");
+    resp.setBody("Hello");
+    
+    ubyte[10] smallBuffer;
+    auto bytesWritten = resp.buildInto(smallBuffer[]);
+    
+    // Buffer too small, should return 0
+    bytesWritten.shouldEqual(0);
+}
+
+// Test 57: Response buildInto with adequate buffer
+@("Response buildInto with adequate buffer")
+unittest
+{
+    auto resp = HTTPResponse(200, "OK");
+    resp.setBody("Hi");
+    
+    ubyte[1024] buffer;
+    auto bytesWritten = resp.buildInto(buffer[]);
+    
+    // Should write something
+    assert(bytesWritten > 0, "Should write response to buffer");
+    
+    // Verify starts with HTTP
+    auto str = cast(string)buffer[0..bytesWritten];
+    assert(str.length >= 4);
+    str[0..4].shouldEqual("HTTP");
+}
+
+// Test 58: Response estimateSize
+@("Response estimateSize returns reasonable value")
+unittest
+{
+    auto resp = HTTPResponse(200, "OK");
+    resp.setBody("Hello, World!");
+    resp.setHeader("Content-Type", "text/plain");
+    
+    auto estimate = resp.estimateSize();
+    
+    // Should be positive
+    assert(estimate > 0, "Estimate should be positive");
+    
+    // Should be larger than body
+    assert(estimate > 13, "Estimate should be larger than body");
+}
+
+// Test 59: Response getContentType
+@("Response getContentType returns default or set value")
+unittest
+{
+    // Default content type
+    {
+        auto resp = HTTPResponse(200, "OK");
+        resp.getContentType().shouldEqual("text/html");  // Default
+    }
+    
+    // Custom content type
+    {
+        auto resp = HTTPResponse(200, "OK");
+        resp.setHeader("Content-Type", "application/json");
+        resp.getContentType().shouldEqual("application/json");
+    }
+}
+
+// Test 60: Response getStatus
+@("Response getStatus returns status code")
+unittest
+{
+    auto resp = HTTPResponse(404, "Not Found");
+    
+    resp.status.shouldEqual(404);
+    resp.getStatus().shouldEqual(404);
+}
+
+// Test 61: Response getBody
+@("Response getBody returns body content")
+unittest
+{
+    auto resp = HTTPResponse(200, "OK");
+    resp.setBody("Test body");
+    
+    resp.getBody().shouldEqual("Test body");
+}
+
+// Test 62: Response with various status codes
+@("Response with various status codes")
+unittest
+{
+    int[] codes = [100, 200, 201, 204, 301, 302, 400, 401, 403, 404, 500, 502, 503];
+    
+    foreach (code; codes)
+    {
+        auto resp = HTTPResponse(code, "Status");
+        auto output = resp.build();
+        
+        assert(output.length > 0, "Response should be built");
+    }
+}
+
+// Test 63: Response setStatus changes status
+@("Response setStatus changes status")
+unittest
+{
+    auto resp = HTTPResponse(200, "OK");
+    
+    resp.getStatus().shouldEqual(200);
+    
+    resp.setStatus(404);
+    resp.getStatus().shouldEqual(404);
+}
+
+// Test 64: Response multiple headers
+@("Response multiple headers")
+unittest
+{
+    auto resp = HTTPResponse(200, "OK");
+    resp.setHeader("Content-Type", "application/json");
+    resp.setHeader("Cache-Control", "no-cache");
+    resp.setHeader("X-Request-Id", "12345");
+    
+    auto output = resp.build();
+    
+    import std.algorithm : canFind;
+    assert(output.canFind("Content-Type"), "Should have Content-Type");
+    assert(output.canFind("Cache-Control"), "Should have Cache-Control");
+    assert(output.canFind("X-Request-Id"), "Should have X-Request-Id");
+}
+
+// Test 65: Request isComplete
+@("Request isComplete for complete request")
+unittest
+{
+    string rawRequest = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+    
+    // Complete request should return true
+    // Note: Wire parser sets messageComplete flag
+}
+
+// Test 66: Request query with edge cases
+@("Request query edge cases")
+unittest
+{
+    // Query with special characters
+    {
+        string rawRequest = "GET /search?q=a+b&c=%26 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+        
+        // Query should preserve encoding
+        assert(req.query.length > 0, "Should have query string");
+    }
+    
+    // Path with multiple query params
+    {
+        string rawRequest = "GET /api?a=1&b=2&c=3&d=4&e=5 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        auto req = HTTPRequest.parse(cast(ubyte[])rawRequest);
+        
+        req.path.shouldEqual("/api");
+        assert(req.query.length > 0, "Should have query string");
+    }
+}

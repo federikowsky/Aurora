@@ -1,1 +1,264 @@
-/** * Aurora Test Server for Network Integration Tests *  * A simple HTTP server for testing security limits and timeouts. * Compile and run: dub run --config=test-server */module tests.integration.test_server;import std.socket;import std.stdio : writeln, writefln, stderr;import std.conv : to;import std.string : toLower;import core.thread;import core.atomic;import core.time : seconds, msecs;import std.algorithm : min;// Configurationenum ushort TEST_PORT = 18080;enum uint MAX_HEADER_SIZE = 64 * 1024;  // 64KBenum size_t MAX_BODY_SIZE = 10 * 1024 * 1024;  // 10MBshared bool running = true;void main(){    writeln("╔══════════════════════════════════════════════════╗");    writeln("║         Aurora Test Server (Security)            ║");    writeln("╠══════════════════════════════════════════════════╣");    writefln("║ Port: %-42d ║", TEST_PORT);    writefln("║ Max Header: %-36d ║", MAX_HEADER_SIZE);    writefln("║ Max Body: %-38d ║", MAX_BODY_SIZE);    writeln("╚══════════════════════════════════════════════════╝");    writeln("\nPress Ctrl+C to stop.\n");    auto server = new TcpSocket();    server.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);    server.bind(new InternetAddress("127.0.0.1", TEST_PORT));    server.listen(128);    server.blocking = true;        // Non-blocking accept with timeout    server.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, 1.seconds);        writeln("Listening for connections...\n");        while (atomicLoad(running))    {        try        {            Socket client = server.accept();            if (client !is null)            {                // Handle in-thread for simplicity (test server)                handleConnection(client);            }        }        catch (SocketOSException)        {            // Accept timeout, check running flag        }        catch (Exception e)        {            stderr.writefln("Accept error: %s", e.msg);        }    }        server.close();    writeln("Server stopped.");}void handleConnection(Socket client){    scope(exit) client.close();        try    {        // Set socket timeouts        client.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, 5.seconds);        client.setOption(SocketOptionLevel.SOCKET, SocketOption.SNDTIMEO, 5.seconds);                // Read buffer with limit        ubyte[] buffer = new ubyte[4096];        size_t totalReceived = 0;        bool headersComplete = false;        size_t headerEnd = 0;                // Read until headers complete or too large        while (!headersComplete && totalReceived < MAX_HEADER_SIZE)        {            // Grow buffer if needed            if (totalReceived >= buffer.length)            {                if (buffer.length >= MAX_HEADER_SIZE)                {                    // Headers too large                    sendError(client, 431);                    return;                }                auto newSize = min(buffer.length * 2, MAX_HEADER_SIZE);                auto newBuf = new ubyte[newSize];                newBuf[0..totalReceived] = buffer[0..totalReceived];                buffer = newBuf;            }                        auto received = client.receive(buffer[totalReceived..$]);            if (received <= 0)            {                return;  // Connection closed or timeout            }                        totalReceived += received;                        // Check for end of headers            for (size_t i = 0; i + 3 < totalReceived; i++)            {                if (buffer[i] == '\r' && buffer[i+1] == '\n' &&                     buffer[i+2] == '\r' && buffer[i+3] == '\n')                {                    headersComplete = true;                    headerEnd = i + 4;                    break;                }            }        }                if (!headersComplete)        {            sendError(client, 431);            return;        }                // Parse request        auto data = cast(string)buffer[0..headerEnd];        auto firstLineEnd = findCRLF(data);        if (firstLineEnd < 0)        {            sendError(client, 400);            return;        }                auto requestLine = data[0..firstLineEnd];                // Parse "GET /path HTTP/1.1"        size_t sp1 = 0, sp2 = 0;        foreach (i, c; requestLine)        {            if (c == ' ')            {                if (sp1 == 0) sp1 = i;                else { sp2 = i; break; }            }        }                if (sp1 == 0 || sp2 == 0)        {            sendError(client, 400);            return;        }                string method = requestLine[0..sp1];        string path = requestLine[sp1+1..sp2];                // Check for Content-Length in headers        size_t contentLength = 0;        auto headers = data[firstLineEnd+2..$];        auto clPos = findContentLength(headers);        if (clPos >= 0)        {            // Parse Content-Length value            auto start = clPos;            auto end = start;            while (end < headers.length && headers[end] != '\r' && headers[end] != '\n')                end++;            try            {                import std.string : strip;                contentLength = headers[start..end].strip().to!size_t;            }            catch (Exception) {}        }                // Check body size limit        if (contentLength > MAX_BODY_SIZE)        {            sendError(client, 413);            return;        }                // Handle routes        if (path == "/test" || path == "/")        {            sendOK(client, `{"status":"ok","server":"aurora-test"}`);        }        else if (path == "/echo")        {            sendOK(client, `{"method":"` ~ method ~ `","path":"` ~ path ~ `"}`);        }        else        {            sendError(client, 404);        }    }    catch (Exception e)    {        stderr.writefln("Connection error: %s", e.msg);    }}int findCRLF(string s){    foreach (i; 0..cast(int)(s.length - 1))    {        if (s[i] == '\r' && s[i+1] == '\n')            return i;    }    return -1;}int findContentLength(string headers){    // Find "Content-Length:" (case-insensitive)    auto lower = headers.toLower();    auto needle = "content-length:";    foreach (i; 0..cast(int)(lower.length - needle.length))    {        if (lower[i..i+needle.length] == needle)            return cast(int)(i + needle.length);    }    return -1;}void sendOK(Socket client, string body_){    sendResponse(client, 200, "OK", body_);}void sendError(Socket client, int code){    string reason;    string body_;    switch (code)    {        case 400: reason = "Bad Request"; body_ = `{"error":"Bad Request"}`; break;        case 404: reason = "Not Found"; body_ = `{"error":"Not Found"}`; break;        case 413: reason = "Payload Too Large"; body_ = `{"error":"Payload Too Large"}`; break;        case 431: reason = "Request Header Fields Too Large"; body_ = `{"error":"Request Header Fields Too Large"}`; break;        default: reason = "Error"; body_ = `{"error":"Error"}`; break;    }    sendResponse(client, code, reason, body_);}void sendResponse(Socket client, int code, string reason, string body_){    // Build response manually (no format for nothrow compatibility)    string response = "HTTP/1.1 " ~ to!string(code) ~ " " ~ reason ~ "\r\n";    response ~= "Content-Type: application/json\r\n";    response ~= "Content-Length: " ~ to!string(body_.length) ~ "\r\n";    response ~= "Connection: close\r\n";    response ~= "\r\n";    response ~= body_;        client.send(cast(ubyte[])response);}
+/**
+ * Aurora Test Server for Network Integration Tests
+ *
+ * A simple HTTP server for testing security limits and timeouts.
+ * Compile and run: dub run --config=test-server
+ */
+module tests.integration.test_server;
+
+import std.socket;
+import std.stdio : writeln, writefln, stderr;
+import std.conv : to;
+import std.string : toLower;
+import core.thread;
+import core.atomic;
+import core.time : seconds, msecs;
+import std.algorithm : min;
+
+// Configuration
+enum ushort TEST_PORT = 18080;
+enum uint MAX_HEADER_SIZE = 64 * 1024;  // 64KB
+enum size_t MAX_BODY_SIZE = 10 * 1024 * 1024;  // 10MB
+
+shared bool running = true;
+
+void main()
+{
+    writeln("╔══════════════════════════════════════════════════╗");
+    writeln("║         Aurora Test Server (Security)            ║");
+    writeln("╠══════════════════════════════════════════════════╣");
+    writefln("║ Port: %-42d ║", TEST_PORT);
+    writefln("║ Max Header: %-36d ║", MAX_HEADER_SIZE);
+    writefln("║ Max Body: %-38d ║", MAX_BODY_SIZE);
+    writeln("╚══════════════════════════════════════════════════╝");
+    writeln("\nPress Ctrl+C to stop.\n");
+
+    auto server = new TcpSocket();
+    server.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
+    server.bind(new InternetAddress("127.0.0.1", TEST_PORT));
+    server.listen(128);
+    server.blocking = true;
+    
+    // Non-blocking accept with timeout
+    server.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, 1.seconds);
+    
+    writeln("Listening for connections...\n");
+    
+    while (atomicLoad(running))
+    {
+        try
+        {
+            Socket client = server.accept();
+            if (client !is null)
+            {
+                // Handle in-thread for simplicity (test server)
+                handleConnection(client);
+            }
+        }
+        catch (SocketOSException)
+        {
+            // Accept timeout, check running flag
+        }
+        catch (Exception e)
+        {
+            stderr.writefln("Accept error: %s", e.msg);
+        }
+    }
+    
+    server.close();
+    writeln("Server stopped.");
+}
+
+void handleConnection(Socket client)
+{
+    scope(exit) client.close();
+    
+    try
+    {
+        // Set socket timeouts
+        client.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, 5.seconds);
+        client.setOption(SocketOptionLevel.SOCKET, SocketOption.SNDTIMEO, 5.seconds);
+        
+        // Read buffer with limit
+        ubyte[] buffer = new ubyte[4096];
+        size_t totalReceived = 0;
+        bool headersComplete = false;
+        size_t headerEnd = 0;
+        
+        // Read until headers complete or too large
+        while (!headersComplete && totalReceived < MAX_HEADER_SIZE)
+        {
+            // Grow buffer if needed
+            if (totalReceived >= buffer.length)
+            {
+                if (buffer.length >= MAX_HEADER_SIZE)
+                {
+                    // Headers too large
+                    sendError(client, 431);
+                    return;
+                }
+                auto newSize = min(buffer.length * 2, MAX_HEADER_SIZE);
+                auto newBuf = new ubyte[newSize];
+                newBuf[0..totalReceived] = buffer[0..totalReceived];
+                buffer = newBuf;
+            }
+            
+            auto received = client.receive(buffer[totalReceived..$]);
+            if (received <= 0)
+            {
+                return;  // Connection closed or timeout
+            }
+            
+            totalReceived += received;
+            
+            // Check for end of headers
+            for (size_t i = 0; i + 3 < totalReceived; i++)
+            {
+                if (buffer[i] == '\r' && buffer[i+1] == '\n' &&
+                    buffer[i+2] == '\r' && buffer[i+3] == '\n')
+                {
+                    headersComplete = true;
+                    headerEnd = i + 4;
+                    break;
+                }
+            }
+        }
+        
+        if (!headersComplete)
+        {
+            sendError(client, 431);
+            return;
+        }
+        
+        // Parse request
+        auto data = cast(string)buffer[0..headerEnd];
+        auto firstLineEnd = findCRLF(data);
+        if (firstLineEnd < 0)
+        {
+            sendError(client, 400);
+            return;
+        }
+        
+        auto requestLine = data[0..firstLineEnd];
+        
+        // Parse "GET /path HTTP/1.1"
+        size_t sp1 = 0, sp2 = 0;
+        foreach (i, c; requestLine)
+        {
+            if (c == ' ')
+            {
+                if (sp1 == 0) sp1 = i;
+                else { sp2 = i; break; }
+            }
+        }
+        
+        if (sp1 == 0 || sp2 == 0)
+        {
+            sendError(client, 400);
+            return;
+        }
+        
+        string method = requestLine[0..sp1];
+        string path = requestLine[sp1+1..sp2];
+        
+        // Check for Content-Length in headers
+        size_t contentLength = 0;
+        auto headers = data[firstLineEnd+2..$];
+        auto clPos = findContentLength(headers);
+        if (clPos >= 0)
+        {
+            // Parse Content-Length value
+            auto start = clPos;
+            auto end = start;
+            while (end < headers.length && headers[end] != '\r' && headers[end] != '\n')
+                end++;
+            try
+            {
+                import std.string : strip;
+                contentLength = headers[start..end].strip().to!size_t;
+            }
+            catch (Exception) {}
+        }
+        
+        // Check body size limit
+        if (contentLength > MAX_BODY_SIZE)
+        {
+            sendError(client, 413);
+            return;
+        }
+        
+        // Handle routes
+        if (path == "/test" || path == "/")
+        {
+            sendOK(client, `{"status":"ok","server":"aurora-test"}`);
+        }
+        else if (path == "/echo")
+        {
+            sendOK(client, `{"method":"` ~ method ~ `","path":"` ~ path ~ `"}`);
+        }
+        else
+        {
+            sendError(client, 404);
+        }
+    }
+    catch (Exception e)
+    {
+        stderr.writefln("Connection error: %s", e.msg);
+    }
+}
+
+int findCRLF(string s)
+{
+    foreach (i; 0..cast(int)(s.length - 1))
+    {
+        if (s[i] == '\r' && s[i+1] == '\n')
+            return i;
+    }
+    return -1;
+}
+
+int findContentLength(string headers)
+{
+    // Find "Content-Length:" (case-insensitive)
+    auto lower = headers.toLower();
+    auto needle = "content-length:";
+    foreach (i; 0..cast(int)(lower.length - needle.length))
+    {
+        if (lower[i..i+needle.length] == needle)
+            return cast(int)(i + needle.length);
+    }
+    return -1;
+}
+
+void sendOK(Socket client, string body_)
+{
+    sendResponse(client, 200, "OK", body_);
+}
+
+void sendError(Socket client, int code)
+{
+    string reason;
+    string body_;
+    switch (code)
+    {
+        case 400: reason = "Bad Request"; body_ = `{"error":"Bad Request"}`; break;
+        case 404: reason = "Not Found"; body_ = `{"error":"Not Found"}`; break;
+        case 413: reason = "Payload Too Large"; body_ = `{"error":"Payload Too Large"}`; break;
+        case 431: reason = "Request Header Fields Too Large"; body_ = `{"error":"Request Header Fields Too Large"}`; break;
+        default: reason = "Error"; body_ = `{"error":"Error"}`; break;
+    }
+    sendResponse(client, code, reason, body_);
+}
+
+void sendResponse(Socket client, int code, string reason, string body_)
+{
+    // Build response manually
+    string response = "HTTP/1.1 " ~ to!string(code) ~ " " ~ reason ~ "\r\n";
+    response ~= "Content-Type: application/json\r\n";
+    response ~= "Content-Length: " ~ to!string(body_.length) ~ "\r\n";
+    response ~= "Connection: close\r\n";
+    response ~= "\r\n";
+    response ~= body_;
+    
+    client.send(cast(ubyte[])response);
+}

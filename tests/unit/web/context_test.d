@@ -368,3 +368,233 @@ unittest
     assert(output.indexOf("201") >= 0, "Should contain 201 status");
     assert(output.indexOf("Created") >= 0, "Should contain body");
 }
+
+// ========================================
+// COVERAGE IMPROVEMENT TESTS
+// ========================================
+
+// Test 21: ctx.header() sets response header
+@("header sets response header")
+unittest
+{
+    Context ctx;
+    auto response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    // Test chaining
+    auto result = ctx.header("X-Custom-Header", "test-value");
+    
+    // Should return self for chaining
+    assert(&result == &ctx || result.response == ctx.response);
+    
+    // Header should be set
+    auto output = ctx.response.build();
+    import std.string : indexOf;
+    assert(output.indexOf("X-Custom-Header") >= 0, "Should contain header name");
+    assert(output.indexOf("test-value") >= 0, "Should contain header value");
+}
+
+// Test 22: ctx.header() with null response doesn't crash
+@("header with null response safe")
+unittest
+{
+    Context ctx;
+    ctx.response = null;
+    
+    // Should not crash
+    auto result = ctx.header("X-Test", "value");
+    
+    // Should return self even with null response
+    assert(&result == &ctx || result.response is null);
+}
+
+// Test 23: ctx.header() chaining multiple headers
+@("header chaining multiple")
+unittest
+{
+    Context ctx;
+    auto response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    // Chain multiple header calls
+    ctx.header("X-Header-1", "value1")
+       .header("X-Header-2", "value2")
+       .header("X-Header-3", "value3");
+    
+    auto output = ctx.response.build();
+    import std.string : indexOf;
+    assert(output.indexOf("X-Header-1") >= 0);
+    assert(output.indexOf("X-Header-2") >= 0);
+    assert(output.indexOf("X-Header-3") >= 0);
+}
+
+// Test 24: ctx.status().header().send() full chain
+@("full method chaining")
+unittest
+{
+    Context ctx;
+    auto response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    ctx.status(201)
+       .header("X-Custom", "test");
+    ctx.send("Created!");
+    
+    auto output = ctx.response.build();
+    import std.string : indexOf;
+    assert(output.indexOf("201") >= 0);
+    assert(output.indexOf("X-Custom") >= 0);
+    assert(output.indexOf("Created!") >= 0);
+}
+
+// Test 25: ContextStorage.has() with overflow entries
+@("storage has with overflow")
+unittest
+{
+    Context ctx;
+    
+    // Fill inline storage (MAX_INLINE_VALUES = 4)
+    ctx.storage.set("a", 1);
+    ctx.storage.set("b", 2);
+    ctx.storage.set("c", 3);
+    ctx.storage.set("d", 4);
+    
+    // Add to overflow
+    ctx.storage.set("overflow_key", 5);
+    ctx.storage.set("overflow_key2", 6);
+    
+    // Test has() for overflow entries
+    ctx.storage.has("overflow_key").shouldBeTrue;
+    ctx.storage.has("overflow_key2").shouldBeTrue;
+    ctx.storage.has("nonexistent_overflow").shouldBeFalse;
+    
+    // Inline entries should still work
+    ctx.storage.has("a").shouldBeTrue;
+    ctx.storage.has("d").shouldBeTrue;
+}
+
+// Test 26: ContextStorage.remove() with overflow entries
+@("storage remove with overflow")
+unittest
+{
+    Context ctx;
+    
+    // Fill inline storage
+    ctx.storage.set("a", 1);
+    ctx.storage.set("b", 2);
+    ctx.storage.set("c", 3);
+    ctx.storage.set("d", 4);
+    
+    // Add to overflow
+    ctx.storage.set("overflow_to_remove", 100);
+    ctx.storage.set("overflow_keep", 200);
+    
+    // Verify overflow entry exists
+    ctx.storage.get!int("overflow_to_remove").shouldEqual(100);
+    
+    // Remove overflow entry
+    ctx.storage.remove("overflow_to_remove");
+    
+    // Verify it's gone
+    ctx.storage.get!int("overflow_to_remove").shouldEqual(0);  // T.init
+    
+    // Other overflow entry should still exist
+    ctx.storage.get!int("overflow_keep").shouldEqual(200);
+}
+
+// Test 27: ContextStorage.remove() inline entry shifts remaining
+@("storage remove inline shifts entries")
+unittest
+{
+    Context ctx;
+    
+    ctx.storage.set("first", 1);
+    ctx.storage.set("second", 2);
+    ctx.storage.set("third", 3);
+    
+    // Remove middle entry
+    ctx.storage.remove("second");
+    
+    // First and third should still work
+    ctx.storage.get!int("first").shouldEqual(1);
+    ctx.storage.get!int("third").shouldEqual(3);
+    ctx.storage.has("second").shouldBeFalse;
+}
+
+// Test 28: ContextStorage.remove() nonexistent key is safe
+@("storage remove nonexistent safe")
+unittest
+{
+    Context ctx;
+    
+    ctx.storage.set("exists", 42);
+    
+    // Should not crash
+    ctx.storage.remove("does_not_exist");
+    
+    // Existing entry should be unaffected
+    ctx.storage.get!int("exists").shouldEqual(42);
+}
+
+// Test 29: ContextStorage get from overflow returns correct value
+@("storage get overflow correct value")
+unittest
+{
+    Context ctx;
+    
+    // Fill inline
+    ctx.storage.set("i1", 10);
+    ctx.storage.set("i2", 20);
+    ctx.storage.set("i3", 30);
+    ctx.storage.set("i4", 40);
+    
+    // Add multiple overflow entries
+    ctx.storage.set("o1", 100);
+    ctx.storage.set("o2", 200);
+    ctx.storage.set("o3", 300);
+    
+    // Get from different positions in overflow
+    ctx.storage.get!int("o1").shouldEqual(100);
+    ctx.storage.get!int("o2").shouldEqual(200);
+    ctx.storage.get!int("o3").shouldEqual(300);
+    
+    // Inline still works
+    ctx.storage.get!int("i1").shouldEqual(10);
+    ctx.storage.get!int("i4").shouldEqual(40);
+}
+
+// Test 30: Mixed inline and overflow operations
+@("storage mixed inline overflow operations")
+unittest
+{
+    Context ctx;
+    
+    // Fill inline
+    foreach (i; 0..4)
+    {
+        import std.conv : to;
+        ctx.storage.set("inline" ~ i.to!string, cast(int)(i * 10));
+    }
+    
+    // Add overflow
+    foreach (i; 0..3)
+    {
+        import std.conv : to;
+        ctx.storage.set("overflow" ~ i.to!string, cast(int)(i * 100));
+    }
+    
+    // Remove from inline
+    ctx.storage.remove("inline1");
+    
+    // Remove from overflow
+    ctx.storage.remove("overflow1");
+    
+    // Verify state
+    ctx.storage.get!int("inline0").shouldEqual(0);
+    ctx.storage.has("inline1").shouldBeFalse;
+    ctx.storage.get!int("inline2").shouldEqual(20);
+    
+    ctx.storage.get!int("overflow0").shouldEqual(0);
+    ctx.storage.has("overflow1").shouldBeFalse;
+    ctx.storage.get!int("overflow2").shouldEqual(200);
+}
