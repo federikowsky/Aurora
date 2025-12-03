@@ -2,8 +2,19 @@
  * Aurora Runtime Module
  *
  * Provides core runtime abstractions:
- * - Server (HTTP server with thread pool architecture)
+ * - Server (fiber-based HTTP server with async I/O)
+ * - Worker (multi-worker support for Linux/FreeBSD)
  */
 module aurora.runtime;
 
 public import aurora.runtime.server;
+
+// Worker module only available on platforms with SO_REUSEPORT
+version(linux)
+{
+    public import aurora.runtime.worker;
+}
+version(FreeBSD)
+{
+    public import aurora.runtime.worker;
+}

@@ -15,7 +15,12 @@
     },
     "libs": [
         "wire",
-        "fastjsond",
+        "fastjsond"
+    ],
+    "libs-linux": [
+        "stdc++"
+    ],
+    "libs-osx": [
         "c++"
     ],
     "importPaths": [
@@ -116,6 +121,14 @@
             "sourceFiles": ["tests/integration/test_server.d"],
             "excludedSourceFiles": ["source/**/*", "tests/**/*"],
             "importPaths": ["source"]
+        },
+        {
+            "name": "fiber-test",
+            "targetType": "executable",
+            "targetName": "fiber_test",
+            "mainSourceFile": "tests/integration/fiber_server_test.d",
+            "sourcePaths": ["source"],
+            "importPaths": ["source", "lib/wire/source", "lib/fastjsond/source"]
         }
     ],
     "buildTypes": {

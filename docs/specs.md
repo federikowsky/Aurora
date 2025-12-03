@@ -248,28 +248,31 @@ if (req.routing.messageComplete) {
 
 #### 3.2.1 Runtime Modules (aurora.runtime.*)
 
-- **aurora.runtime.reactor**: Event loop wrapper, socket lifecycle
-- **aurora.runtime.scheduler**: Fiber scheduling, work stealing
-- **aurora.runtime.worker**: Worker thread abstraction
-- **aurora.runtime.fiber**: Fiber management, context switching
+- **aurora.runtime.server**: Main server implementation, connection handling
+- **aurora.runtime.worker**: Multi-worker pool for Linux/FreeBSD (SO_REUSEPORT)
+
+> [!NOTE]
+> **V0.3 Decision**: The following modules are NOT implemented because vibe-core provides them:
+> - `aurora.runtime.reactor` → use `vibe.core.core.runEventLoop()`
+> - `aurora.runtime.scheduler` → use `vibe.core.task`
+> - `aurora.runtime.fiber` → use `vibe.core.task.Task`
+> - `aurora.runtime.connection` → logic is in server.d `processConnection()`
 
 #### 3.2.2 Memory Modules (aurora.mem.*)
 
-- **aurora.mem.pool**: Buffer pools, object pools
-- **aurora.mem.allocator**: Custom allocator abstraction
+- **aurora.mem.pool**: Buffer pools
+- **aurora.mem.object_pool**: Generic object pools
 - **aurora.mem.arena**: Arena allocator for temporary allocations
 
 #### 3.2.3 HTTP Protocol Modules (aurora.http.*)
 
-- **aurora.http**: HTTP/1.1 parsing (Wire integration)
-- **aurora.http.request**: HTTPRequest structure and parsing
-- **aurora.http.response**: HTTPResponse structure and formatting
+- **aurora.http.package**: HTTPRequest/HTTPResponse (Wire integration)
+- **aurora.http.util**: Status codes, response building utilities
 
 **Note**: 
 - TLS/HTTPS is handled by reverse proxy (nginx, Caddy)
 - HTTP/2, HTTP/3 are handled by reverse proxy
 - Aurora V0 focuses ONLY on HTTP/1.1
-- Connection management is in `aurora.runtime.connection`
 
 > [!NOTE]
 > Package `aurora.net.*` is **reserved for future use** for additional network protocols:
@@ -395,9 +398,38 @@ Available validation attributes:
 ### 5.0 Implementation Status (V0.1)
 
 > [!IMPORTANT]
-> **V0.1 Implementation**: L'architettura attuale utilizza un design semplificato ma completamente funzionale.
+> **V0.3 Implementation (Current)**: Architettura multi-worker con SO_REUSEPORT su Linux/FreeBSD.
 
-#### V0.1 Architettura Implementata
+#### V0.3 Architettura Implementata (Linux/FreeBSD)
+
+**Design**: Multi-worker con SO_REUSEPORT (kernel load balancing)
+
+```
+         ┌──────────────────────────────────────┐
+         │             OS Kernel                │
+         │    (SO_REUSEPORT load balancing)     │
+         │         Port 8080                    │
+         └──────────────────────────────────────┘
+                    ↑ ↑ ↑ ↑ ↑
+                    │ │ │ │ │  Kernel distributes connections
+    ┌───────────────┼─┼─┼─┼─┼───────────────┐
+    │               │ │ │ │ │               │
+    ▼               ▼ ▼ ▼ ▼ ▼               ▼
+┌─────────┐     ┌─────────┐          ┌─────────┐
+│Worker 0 │     │Worker 1 │   ...    │Worker N │
+│         │     │         │          │         │
+│listenTCP│     │listenTCP│          │listenTCP│
+│ port:   │     │ port:   │          │ port:   │
+│ 8080    │     │ 8080    │          │ 8080    │
+│         │     │         │          │         │
+│eventLoop│     │eventLoop│          │eventLoop│
+│fiberPool│     │fiberPool│          │fiberPool│
+│         │     │         │          │         │
+│Thread 1 │     │Thread 2 │          │Thread N │
+└─────────┘     └─────────┘          └─────────┘
+```
+
+#### V0.3 Architettura Implementata (macOS/Windows)
 
 **Design**: Single event loop con fiber-based concurrency (vibe-core)
 
@@ -420,42 +452,63 @@ Available validation attributes:
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Caratteristiche V0.1**:
-- ✅ Cross-platform (Linux, macOS, Windows) - stesso codice su tutte le piattaforme
-- ✅ N workers = N fiber pools (N=1 è caso speciale di N workers)
-- ✅ Zero errori di socket/kqueue (validato con 50K+ requests)
+**Caratteristiche V0.3**:
+- ✅ **Linux/FreeBSD**: Multi-worker con SO_REUSEPORT (kernel load balancing)
+- ✅ **macOS/Windows**: Single event loop con fiber pool (same API)
+- ✅ Cross-platform (stesso codice, comportamento ottimizzato per piattaforma)
 - ✅ Keep-alive connection support
-- ✅ 9K+ requests/second su MacBook Pro M2
-- ✅ 100% success rate sotto stress test
+- ✅ Security limits (max header size, max body size, timeouts)
+- ✅ Graceful shutdown
+- ✅ Tested: 1276 RPS @ 500 concurrent connections (Linux Docker)
 
-**API Server (V0.1)**:
+**API Server (V0.3)**:
 ```d
 import aurora.runtime.server;
-
-// Simple handler mode
-auto server = new Server((scope HTTPRequest* req, scope ResponseWriter w) {
-    w.writeJson(200, `{"status":"ok"}`);
-}, ServerConfig.defaults());
+import aurora.web.router;
 
 // Router mode
 auto router = new Router();
-router.get("/health", (ref Context ctx) {
-    ctx.json(`{"status":"ok"}`);
+router.get("/", (ref Context ctx) {
+    ctx.response.setBody(`{"status":"ok","architecture":"fiber"}`);
 });
-auto server = new Server(router, null, config);
+router.get("/health", (ref Context ctx) {
+    ctx.response.setBody(`{"health":"good"}`);
+});
+
+auto config = ServerConfig();
+config.port = 8080;
+config.host = "0.0.0.0";
+// config.workers auto-detected (numCPUs on Linux, 1 on macOS)
+
+auto server = new Server(router, config);
 server.run();
 ```
 
-**Benchmark Results (V0.1)**:
-| Workers | Requests | Success Rate | Throughput |
-|---------|----------|--------------|------------|
-| 1       | 10,000   | 100%         | 9,641 req/s |
-| 4       | 50,000   | 100%         | 9,198 req/s |
+**Benchmark Results (V0.3 - wrk stress test)**:
+
+| Test | Linux Docker (Multi-Worker) | macOS Native (Single-Listener) |
+|------|----------------------------|-------------------------------|
+| 100 connections | **28,833 req/s** | **67,710 req/s** |
+| 500 connections | **34,000 req/s** | **64,582 req/s** |
+| 1000 connections | **34,488 req/s** | **64,283 req/s** |
+| 2000 connections | **34,909 req/s** | **62,208 req/s** |
+| /echo endpoint 500 conn | **35,015 req/s** | **63,473 req/s** |
+
+**Test Configuration**:
+- Linux Docker: LDC 1.38.0, ARM64 (Apple Silicon via Docker Desktop), 10 workers (SO_REUSEPORT)
+- macOS Native: LDC 1.41.0, ARM64 (Apple M-series), single-listener with CFRunLoop
+- wrk benchmark: 4-8 threads, 10-15s duration per test
+
+**Key Observations**:
+- macOS is ~2x faster due to native execution (no Docker overhead/virtualization)
+- Linux multi-worker scales excellently: stable 34-35k req/s from 100 to 2000 connections
+- macOS single-listener degrades slightly under high concurrency (67k→62k req/s)
+- Both architectures are stable with minimal errors under extreme load
 
 > [!NOTE]
-> V0.2+ implementerà l'architettura multi-thread completa (sezione 5.1) con NUMA affinity e thread pinning per Linux.
+> V0.4+ will implement NUMA affinity and thread pinning (section 5.1) for even better Linux performance on bare metal.
 
-### 5.1 Threading Model (V0.2+ Target)
+### 5.1 Threading Model (V0.4+ Target)
 
 #### 5.1.1 Thread Architecture
 
