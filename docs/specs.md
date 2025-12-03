@@ -140,11 +140,17 @@ if (req.routing.messageComplete) {
 - ❌ Multipart body parsing (raw bytes only)
 
 #### 2.2.4 JSON Parser
-**Library**: `simdjson` (C++ library, version ≥ 3.0)  
+**Library**: `fastjsond` (D wrapper for simdjson C++ library)  
 **Purpose**: JSON parsing with SIMD acceleration (GB/s throughput)  
-**Binding**: Custom D binding with @nogc interface
+**Location**: `lib/fastjsond/` (vendored in repository)
 
-**Requirements**:
+**V0.3 Implementation**:
+- Uses simdjson via fastjsond D bindings
+- On-demand parsing for lazy field access
+- High-performance JSON serialization/deserialization
+- Integrated in `aurora.schema.json`
+
+**Requirements** (provided by simdjson):
 - On-demand parsing (lazy field access)
 - Zero-copy string views into original buffer
 - Validation in single pass
@@ -178,29 +184,37 @@ if (req.routing.messageComplete) {
 
 ### 2.3 Additional Dependencies (Selected Best-in-Class)
 
-#### 2.3.1 Memory Allocator
+> [!NOTE]
+> **V0.3 Status**: The following dependencies are **NOT currently integrated** but are planned for V0.4+.
+> They are documented here as design targets for future optimization.
+
+#### 2.3.1 Memory Allocator (V0.4+ Target)
 **Library**: `mimalloc` (Microsoft, version ≥ 2.1)  
 **Purpose**: High-performance allocator with thread-local caching  
 **Integration**: Linked as system allocator replacement
 
 **Rationale**: Superior fragmentation behavior, O(1) allocations, excellent multi-thread scaling
 
-#### 2.3.2 Hashing
+**V0.3 Status**: Using D runtime's default allocator + custom pools (`aurora.mem.*`)
+
+#### 2.3.2 Hashing (V0.4+ Target)
 **Library**: `xxHash` (version ≥ 0.8)  
 **Purpose**: Non-cryptographic hash for routing, caching  
 **Binding**: Custom D binding
 
 **Rationale**: xxHash3 offers 30GB/s+ throughput, ideal for hot paths
 
+**V0.3 Status**: Using D standard library `hashOf()` for routing
+
 #### 2.3.3 Logging Backend
-**Implementation**: Custom implementation using memory-mapped ring buffers  
-**Purpose**: Lock-free logging with async flush  
-**No external dependency**
+**Implementation**: `aurora.logging` module  
+**Purpose**: Structured logging with configurable output  
+**V0.3 Status**: ✅ Implemented (basic structured logging)
 
 #### 2.3.4 Metrics
-**Implementation**: Custom Prometheus-compatible exporter  
-**Purpose**: /metrics endpoint with lock-free counters  
-**No external dependency**
+**Implementation**: `aurora.metrics` module  
+**Purpose**: /metrics endpoint with counters  
+**V0.3 Status**: ✅ Implemented (basic metrics counters)
 
 ---
 
@@ -298,10 +312,12 @@ if (req.routing.messageComplete) {
 
 #### 3.2.5 Schema System Modules (aurora.schema.*)
 
-- **aurora.schema.base**: BaseSchema, BaseSettings classes
-- **aurora.schema.validation**: Validation engine, UDA processing
-- **aurora.schema.codegen**: Compile-time code generation
-- **aurora.schema.attributes**: UDA definitions (@Required, @Range, etc.)
+**V0.3 Implemented Modules**:
+- **aurora.schema.validation**: Validation engine, UDA processing, BaseSchema/BaseSettings classes
+- **aurora.schema.json**: JSON serialization/deserialization integration
+- **aurora.schema.exceptions**: Schema validation exceptions
+
+**Note**: V0.3 consolidates schema functionality into fewer files. UDA attributes (@Required, @Range, etc.) are defined within `validation.d`.
 
 #### 3.2.6 Extension Modules (aurora.ext.*)
 
@@ -325,16 +341,19 @@ if (req.routing.messageComplete) {
 > [!IMPORTANT]
 > Business logic (JWT, rate limiting, auth) must be implemented by the user using external libraries.
 
-#### 3.2.7 Utility Modules (aurora.util.*)
+#### 3.2.7 Utility Modules
 
-- **aurora.util.config**: Configuration system, ENV loading
+**V0.3 Implemented Modules** (top-level packages, not aurora.util.*):
+- **aurora.config**: Configuration system, ENV loading, ServerConfig
+- **aurora.logging**: Structured logging infrastructure
+- **aurora.metrics**: Metrics counters for observability
 
-- **aurora.util.hash**: xxHash wrappers
-- **aurora.util.string**: String operations, parsing
-- **aurora.util.time**: High-resolution timing, date parsing
-- **aurora.util.intrinsics**: SIMD wrappers, CPU detection
-- **aurora.util.log**: Lock-free logging infrastructure
-- **aurora.util.metrics**: Lock-free metrics counters
+**Note**: V0.3 uses top-level packages (`aurora.config`, `aurora.logging`, `aurora.metrics`) instead of a `aurora.util.*` namespace. This provides clearer imports and better discoverability.
+
+**V0.4+ Candidates** (not yet implemented):
+- Hash utilities (xxHash integration)
+- SIMD wrappers for manual vectorization
+- High-resolution timing utilities
 
 ---
 
@@ -692,83 +711,60 @@ struct ServerConfig {
 
 ### 5.2 Fiber Scheduling
 
-**Package**: `aurora.runtime.scheduler`
-
-Aurora uses **vibe-core** for fiber primitives but implements a custom scheduler integrated with the event loop.
-
-#### 5.2.1 Fiber Model
-
-**vibe-core Integration**:
-```d
-import vibe.core.task;
-
-// Fiber creation (vibe-core API)
-auto fiber = runTask({
-    handleRequest(connection);
-});
-
-// Fiber yielding
-fiber.yield();  // Suspend until resume
-
-// Fiber sleep (event-driven)
-sleep(100.msecs);  // Yields fiber, wakes on timer
-```
-
-**Fiber States**:
-- `READY`: In scheduler queue, waiting to run
-- `RUNNING`: Currently executing on worker
-- `WAITING`: Suspended on I/O or timer
-- `COMPLETED`: Finished execution, ready for cleanup
-
-#### 5.2.2 Scheduler Implementation
-
-**vibe-core TaskQueue Integration**:
-```d
-// Aurora wraps vibe-core scheduler
-struct FiberScheduler {
-    // vibe-core manages fiber queue internally
-    // Aurora only needs to integrate with event loop
-    
-    void scheduleTask(void delegate() @safe nothrow task) {
-        runTask(task);  // vibe-core API
-    }
-    
-    void yield() {
-        Task.yield();  // vibe-core API
-    }
-    
-    void sleep(Duration timeout) {
-        vibe.core.core.sleep(timeout);  // vibe-core sleep
-    }
-}
-```
-
-**Worker Event Loop Integration**:
-```d
-void workerMain(Worker* worker) {
-    // vibe-core event loop integration
-    runEventLoop();  // vibe-core manages fiber scheduling + event loop
-}
-```
-
 > [!NOTE]
-> **vibe-core handles**:  
-> - Fiber creation, suspension, resumption
-> - Event loop integration (via eventcore)
-> - Task queue management
->  
-> **Aurora adds**:  
-> - HTTP-specific connection handling
-> - Request routing and middleware execution
-> - Memory pool integration
+> **V0.3 Implementation**: Aurora uses **vibe-core directly** for fiber scheduling.
+> There is NO custom `aurora.runtime.scheduler` module - vibe-core handles all fiber management.
 
-#### 5.2.3 Work Stealing (Future Enhancement)
+#### 5.2.1 vibe-core Direct Usage (V0.3)
 
-**Current V0**: NO work stealing (vibe-core default per-thread scheduling)
-
-**Future**: Implement custom work-stealing queue on top of vibe-core:
+**Imports Used**:
 ```d
-// Future enhancement (not in V0)
+import vibe.core.core : runTask, runWorkerTask, runWorkerTaskDist, yield;
+import vibe.core.net : listenTCP, TCPConnection;
+```
+
+**Fiber Creation** (in server.d/worker.d):
+```d
+// Single connection handler (spawns fiber)
+void handleConnection(TCPConnection conn) {
+    // This runs in its own fiber
+    processRequest(conn);
+}
+
+// Multi-worker task distribution (Linux)
+runWorkerTaskDist((pool) {
+    // Task runs on one of the worker threads
+    pool.startListening();
+});
+```
+
+**Fiber States** (managed by vibe-core):
+- `READY`: In vibe-core's task queue
+- `RUNNING`: Currently executing
+- `WAITING`: Suspended on I/O (eventcore handles this)
+- `COMPLETED`: Task finished
+
+#### 5.2.2 How Aurora Uses vibe-core
+
+**vibe-core handles**:
+- Fiber creation, suspension, resumption
+- Event loop integration (via eventcore)
+- Task queue management
+- I/O operations (TCPConnection read/write)
+
+**Aurora adds**:
+- Multi-worker coordination (`aurora.runtime.worker`)
+- HTTP request parsing (via Wire library)
+- Request routing and middleware execution
+- Memory pool integration (`aurora.mem.*`)
+
+#### 5.2.3 Work Stealing (V0.4+ Target)
+
+**V0.3**: NO work stealing - each worker has its own event loop and fiber pool
+
+**V0.4+ Target**: Custom work-stealing scheduler for better load balancing:
+```d
+// Future enhancement (not in V0.3)
 Fiber* tryStealFromOthers() {
     for (otherWorker in workers) {
         if (fiber = otherWorker.scheduler.steal()) {
@@ -779,86 +775,79 @@ Fiber* tryStealFromOthers() {
 }
 ```
 
-**V0 Decision**: KISS principle - use vibe-core defaults, optimize later if needed.
-
 ---
 
-### 5.3 Event Loop (Reactor)
+### 5.3 Event Loop
 
-**Package**: `aurora.runtime.reactor`
+> [!NOTE]
+> **V0.3 Implementation**: Aurora uses **vibe-core/eventcore directly**.
+> There is NO custom `aurora.runtime.reactor` module - eventcore handles all I/O.
 
-Aurora wraps **eventcore** for event loop, integrated with **vibe-core** fiber scheduling.
+#### 5.3.1 vibe-core Network API (V0.3)
 
-#### 5.3.1 Reactor Interface
-
-**Reactor Design** (class with public API):
+**How Aurora handles I/O**:
 ```d
-class Reactor {
-    private EventDriver driver;  // eventcore driver (platform-specific)
+import vibe.core.net : listenTCP, TCPConnection;
+
+// Server listening
+auto listener = listenTCP(config.port, &handleConnection, config.host);
+
+// Connection handling (in fiber)
+void handleConnection(TCPConnection conn) {
+    ubyte[] buffer = new ubyte[4096];
     
-    // Public socket I/O API (encapsulation)
-    auto socketRead(SocketFD socket, ubyte[] buffer) @trusted nothrow;
-    auto socketWrite(SocketFD socket, const(ubyte)[] data) @trusted nothrow;
+    // Read (blocks fiber, not thread)
+    auto bytesRead = conn.read(buffer);
     
-    // Timer management
-    TimerID createTimer(Duration timeout, callback);
-    void cancelTimer(TimerID);
+    // Write (blocks fiber, not thread)  
+    conn.write(responseData);
     
-    // Socket registration (for future event-driven patterns)
-    void registerSocket(SocketFD, SocketEvent, callback);
-    void unregisterSocket(SocketFD);
-    
-    // Lifecycle
-    void shutdown() @trusted nothrow;
+    conn.close();
 }
 ```
 
-**Key Design Decisions**:
-- ✅ **Encapsulation**: `driver` is private, all I/O through public API
-- ✅ **socketRead/socketWrite**: Only way to access eventcore I/O
-- ✅ **No direct driver access**: Prevents coupling to eventcore internals
-- ✅ **Class reference**: Reactor is a class (GC-managed), not a pointer
+**Platform-specific backends** (transparent to Aurora):
+- Linux: epoll (or io_uring if kernel ≥ 5.10)
+- macOS: kqueue + CFRunLoop
+- Windows: IOCP
 
-#### 5.3.2 I/O Operations with IOStatus
+#### 5.3.2 I/O Characteristics
 
-Aurora uses `eventcore` I/O with **explicit IOStatus handling** for robustness:
+**vibe-core TCPConnection provides**:
+- Fiber-aware blocking I/O (yields fiber on would-block)
+- Automatic buffer management
+- Connection timeout handling
+- Keep-alive support
 
-**ReadResult/WriteResult Structs**:
+**Aurora's role**:
+- Parse HTTP requests (via Wire library)
+- Route requests to handlers
+- Execute middleware pipeline
+- Send HTTP responses
+
+#### 5.3.3 Timer Management (via vibe-core)
+
 ```d
-struct ReadResult {
-    size_t bytesRead;
-    IOStatus status;  // ok, wouldBlock, eof, error
-}
+import vibe.core.core : setTimer, sleep;
+import core.time : seconds, msecs;
 
-struct WriteResult {
-    size_t bytesWritten;
-    IOStatus status;
-}
+// One-shot timer
+auto timer = setTimer(30.seconds, {
+    // Timeout callback
+    connection.close();
+});
+
+// Cancel timer
+timer.stop();
+
+// Sleep (yields fiber)
+sleep(100.msecs);
 ```
 
-**I/O Pattern** (IOMode.once + IOStatus):
-```d
-// Read with IOStatus (via Reactor API)
-ReadResult eventcoreRead(ubyte[] buffer) {
-    auto result = reactor.socketRead(socket, buffer);
-    return ReadResult(result[1], result[0]);  // bytes, status
-}
-
-// Handle ALL IOStatus states explicitly
-final switch (result.status) {
-    case IOStatus.ok:
-        if (result.bytesRead > 0) {
-            // Process data
-        }
-        break;
-        
-    case IOStatus.wouldBlock:
-        // Socket not ready - NORMAL for non-blocking I/O
-        // Yield to other fibers, try again later
-        yield();
-        break;
-        
-    case IOStatus.eof:
+**Connection Timeouts** (configurable in ServerConfig):
+- Read timeout: 30s default
+- Write timeout: 30s default  
+- Keep-alive timeout: 60s default
         // Clean connection close by peer
         close();
         return;
@@ -909,113 +898,69 @@ struct ConnectionTimeouts {
 
 ### 5.4 Connection Management
 
-**Package**: `aurora.net.http`
+> [!NOTE]
+> **V0.3 Implementation**: Connection management is handled directly in `aurora.runtime.server`.
+> There is NO separate `aurora.net.http` module - all logic is in `server.d`.
 
-#### 5.4.1 Connection State Machine (Event-Driven)
+#### 5.4.1 Connection Handling (V0.3)
 
-**Critical**: Aurora uses **event-driven** connection handling (NO blocking `while` loops).
-
-**Connection States**:
+**Implementation in server.d**:
 ```d
-enum ConnectionState {
-    NEW,                // Just accepted
-    READING_HEADERS,    // Reading HTTP request line + headers
-    READING_BODY,       // Reading request body (if present)
-    PROCESSING,         // Executing handler (user code)
-    WRITING_RESPONSE,   // Sending HTTP response
-    KEEP_ALIVE,         // Waiting for next request on same connection
-    CLOSING             // Shutdown initiated
-}
-```
-
-**Connection Struct**:
-```d
-align(64) struct Connection {
-    // Hot data (first cache line)
-    Socket socket;
-    ConnectionState state;
-    Worker* worker;              // Owner worker
-    Fiber fiber;                 // Handler fiber (vibe-core)
+// Connection handler (runs in fiber)
+void handleConnection(TCPConnection conn) {
+    scope(exit) conn.close();
     
-    // Buffers
-    ubyte[] readBuffer;          // From memoryPool
-    size_t readPos;              // Current read position
-    ubyte[] writeBuffer;         // Response buffer
-    size_t writePos;             // Current write position
+    ubyte[] buffer = new ubyte[4096];
     
-    // Parsed request (from Wire)
-    ParsedHttpRequest* wireRequest;
-    
-    // Aurora request/response
-    HTTPRequest request;
-    HTTPResponse response;
-    
-    // Timers
-    TimerID readTimer;
-    TimerID writeTimer;
-    TimerID keepAliveTimer;
-    
-    // Metadata
-    MonoTime lastActivity;
-    bool keepAlive;
-    
-    ulong requestsServed;
+    while (true) {  // Keep-alive loop
+        // Read request
+        auto bytesRead = conn.read(buffer);
+        if (bytesRead == 0) break;  // Connection closed
+        
+        // Parse HTTP (via Wire)
+        auto request = parseHTTP(buffer[0..bytesRead]);
+        
+        // Route and execute handler
+        auto response = router.dispatch(request);
+        
+        // Send response
+        conn.write(response.toBytes());
+        
+        // Check keep-alive
+        if (!request.keepAlive) break;
+    }
 }
 ```
 
 **Connection Lifecycle**:
-1. Accept socket
-2. Create fiber with `handleConnectionLoop()`
-3. Fiber runs until connection closes
-4. Cleanup in `finally` block
-5. Fiber terminates
+1. `listenTCP()` accepts connection
+2. vibe-core spawns fiber for `handleConnection()`
+3. Fiber handles request/response loop (keep-alive)
+4. `scope(exit)` ensures cleanup
+5. Fiber terminates on close
 
-- ✅ Pattern standard in async frameworks (Node.js, Tokio, async/await)
+#### 5.4.2 Security Limits (V0.3)
 
-#### 5.4.3 Connection Pool
-
-**Connection Reuse** (keep-alive):
+**Configurable in ServerConfig**:
 ```d
-void resetConnection(Connection* conn) {
-    // Reset for next request on same connection
-    conn.readPos = 0;
-    conn.writePos = 0;
-    conn.wireRequest = null;
-    conn.state = ConnectionState.READING_HEADERS;
-    conn.lastActivity = MonoTime.currTime;
-    
-    // Re-register for read
-    conn.worker.reactor.registerSocket(conn.socket, FDRead, {
-        onReadable(conn);
-    });
-    
-    // Set keep-alive timeout
-    conn.keepAliveTimer = setTimer(keepAliveTimeout, {
-        closeConnection(conn);
-    });
+struct ServerConfig {
+    // Connection limits
+    size_t maxHeaderSize = 8192;      // 8KB max header
+    size_t maxBodySize = 1_048_576;   // 1MB max body
+    Duration readTimeout = 30.seconds;
+    Duration writeTimeout = 30.seconds;
+    Duration keepAliveTimeout = 60.seconds;
 }
 ```
 
-**Pool Management**:
-```d
-// Per-worker connection pool (avoid allocations)
-struct ConnectionPool {
-    Connection[MAX_CONNECTIONS_PER_WORKER] pool;
-    Connection*[] freeList;
-    
-    Connection* allocate() @nogc {
-        if (freeList.length > 0) {
-            return freeList.popBack();
-        }
-        return null;  // Pool exhausted
-    }
-    
-    void release(Connection* conn) @nogc {
-        conn.reset();
-        freeList ~= conn;
-    }
-}
-```
+#### 5.4.3 Keep-Alive Support
+
+**V0.3 Implementation**:
+- HTTP/1.1 keep-alive enabled by default
+- Connection reused for multiple requests
+- Timeout-based idle connection cleanup
+
+---
 
 ### 5.X Connection Management Critical Bug Fixes
 
