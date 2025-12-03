@@ -27,6 +27,8 @@ import aurora.web.router : Router, Match, PathParams;
 import aurora.web.context : Context;
 import aurora.web.middleware : MiddlewarePipeline;
 import aurora.http.util : getStatusText, getStatusLine, buildResponseInto;
+import aurora.runtime.hooks : ServerHooks, TypeErasedHandler, StartHook, StopHook, 
+                               ErrorHook, RequestHook, ResponseHook, ExceptionHandler;
 
 // Worker pool for multi-threaded mode (Linux/FreeBSD only)
 version(linux)
@@ -268,6 +270,12 @@ final class Server
         MiddlewarePipeline pipeline;
         RequestHandler handler;
         
+        // Server hooks for lifecycle events
+        ServerHooks _hooks;
+        
+        // Exception handlers (type hierarchy based)
+        TypeErasedHandler[TypeInfo_Class] _exceptionHandlers;
+        
         // State
         shared bool running;
         shared bool shuttingDown;
@@ -342,6 +350,59 @@ final class Server
     }
     
     // ========================================
+    // HOOKS & EXCEPTION HANDLERS
+    // ========================================
+    
+    /// Access server hooks for lifecycle events
+    /// Example: server.hooks.onStart(() => writeln("Server starting!"));
+    ref ServerHooks hooks() @safe nothrow
+    {
+        return _hooks;
+    }
+    
+    /// Register a typed exception handler
+    /// Example: server.addExceptionHandler!ValidationError((ctx, e) => ctx.response.json(...));
+    void addExceptionHandler(E : Exception)(ExceptionHandler!E handler) @trusted
+    {
+        if (handler is null)
+        {
+            throw new Exception("Exception handler cannot be null");
+        }
+        
+        // Wrap typed handler in type-erased form
+        TypeErasedHandler wrapped = (ref Context ctx, Exception e) @trusted {
+            // Safe downcast - we know the type matches when this is called
+            if (auto typed = cast(E) e)
+            {
+                handler(ctx, typed);
+            }
+        };
+        
+        _exceptionHandlers[typeid(E)] = wrapped;
+    }
+    
+    /// Check if an exception handler is registered for a type
+    bool hasExceptionHandler(E : Exception)() const @safe nothrow
+    {
+        return (typeid(E) in _exceptionHandlers) !is null;
+    }
+    
+    /// Get number of registered exception handlers
+    size_t exceptionHandlerCount() const @safe nothrow
+    {
+        return _exceptionHandlers.length;
+    }
+    
+    /// Add a type-erased exception handler directly (used by App)
+    /// This is an internal API - prefer addExceptionHandler!E() for type safety
+    void addExceptionHandlerDirect(TypeInfo_Class typeInfo, TypeErasedHandler handler) @safe
+    {
+        if (handler is null)
+            throw new Exception("Exception handler cannot be null");
+        _exceptionHandlers[typeInfo] = handler;
+    }
+    
+    // ========================================
     // SERVER CONTROL (unchanged API)
     // ========================================
     
@@ -372,6 +433,17 @@ final class Server
             writeln("╚════════════════════════════════════════╝");
         }
         
+        // Execute onStart hooks
+        try
+        {
+            _hooks.executeOnStart();
+        }
+        catch (Exception e)
+        {
+            atomicStore(running, false);
+            throw new Exception("onStart hook failed: " ~ e.msg);
+        }
+        
         // Platform-specific startup
         try
         {
@@ -391,8 +463,17 @@ final class Server
         catch (Exception e)
         {
             atomicStore(running, false);
+            // Execute onStop hooks even on failure
+            try { _hooks.executeOnStop(); } catch (Exception) {}
             throw new Exception("Failed to start server: " ~ e.msg);
         }
+        
+        // Execute onStop hooks
+        try
+        {
+            _hooks.executeOnStop();
+        }
+        catch (Exception) {}  // Don't fail on stop hook errors
         
         // Cleanup
         atomicStore(running, false);
@@ -625,6 +706,51 @@ final class Server
     {
         try { conn.close(); }
         catch (Exception) {}
+    }
+    
+    /**
+     * Handle an exception using the registered exception handlers.
+     * 
+     * Strategy:
+     * 1. Execute all onError hooks first (for logging/monitoring)
+     * 2. Search for an exact type match handler
+     * 3. Walk up the class hierarchy looking for a handler
+     * 4. If no handler found, rethrow the exception (like FastAPI/Express)
+     *
+     * Returns: true if exception was handled, false if it was rethrown
+     */
+    private bool handleException(ref Context ctx, Exception e) @trusted
+    {
+        // Step 1: Execute all onError hooks (for logging/monitoring)
+        // These run regardless of whether a handler exists
+        try
+        {
+            _hooks.executeOnError(e, ctx);
+        }
+        catch (Exception hookError)
+        {
+            // Hook failure should not prevent exception handling
+            // But we could log this in debug mode
+        }
+        
+        // Step 2: Find handler by walking up the type hierarchy
+        TypeInfo_Class typeInfo = typeid(e);
+        
+        while (typeInfo !is null)
+        {
+            if (auto handler = typeInfo in _exceptionHandlers)
+            {
+                // Found a handler - execute it
+                (*handler)(ctx, e);
+                return true;
+            }
+            
+            // Walk up to parent class
+            typeInfo = typeInfo.base;
+        }
+        
+        // Step 3: No handler found - propagate the exception
+        throw e;
     }
     
     private void handleConnection(TCPConnection conn) @safe nothrow
@@ -879,18 +1005,22 @@ final class Server
     
     private ubyte[] handleWithRouter(HTTPRequest* request) @trusted
     {
+        Context ctx;
+        ctx.request = request;
+        
+        auto response = HTTPResponse(200, "OK");
+        ctx.response = &response;
+        
         try
         {
+            // Execute onRequest hooks
+            _hooks.executeOnRequest(ctx);
+            
             auto result = router.match(request.method(), request.path());
             
             if (result.found && result.handler !is null)
             {
-                auto ctx = Context();
-                ctx.request = request;
                 ctx.params = result.params;
-                
-                auto response = HTTPResponse(200, "OK");
-                ctx.response = &response;
                 
                 // Execute with middleware pipeline if available
                 if (pipeline !is null && pipeline.length > 0)
@@ -901,17 +1031,34 @@ final class Server
                 {
                     result.handler(ctx);
                 }
-                
-                return buildResponse(response.status, response.getContentType(), response.getBody());
             }
             else
             {
-                return buildResponse(404, "application/json", `{"error":"Not Found"}`);
+                response.setStatus(404);
+                response.setHeader("Content-Type", "application/json");
+                response.setBody(`{"error":"Not Found"}`);
             }
+            
+            // Execute onResponse hooks
+            _hooks.executeOnResponse(ctx);
+            
+            return buildResponse(response.status, response.getContentType(), response.getBody());
         }
-        catch (Exception)
+        catch (Exception e)
         {
-            return buildResponse(500, "application/json", `{"error":"Internal Server Error"}`);
+            // Try to handle with registered exception handlers
+            try
+            {
+                handleException(ctx, e);
+                // Handler executed - return the response it set
+                _hooks.executeOnResponse(ctx);
+                return buildResponse(response.status, response.getContentType(), response.getBody());
+            }
+            catch (Exception)
+            {
+                // No handler found or handler failed - return 500
+                return buildResponse(500, "application/json", `{"error":"Internal Server Error"}`);
+            }
         }
     }
     

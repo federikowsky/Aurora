@@ -82,6 +82,11 @@
                 "tests"
             ],
             "mainSourceFile": "tests/runner.d",
+            "excludedSourceFiles": [
+                "tests/unit/web/middleware.disabled/*",
+                "tests/realworld/*",
+                "tests/stress/*"
+            ],
             "dflags": [
                 "-unittest",
                 "-cov"

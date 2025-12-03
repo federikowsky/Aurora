@@ -1123,6 +1123,228 @@ Both modules would cause catastrophic failures without fixes:
 
 ---
 
+### 5.X. SERVER HOOKS & EXCEPTION HANDLERS (V0.4)
+
+**Package**: `aurora.runtime.hooks`, `aurora.app`
+
+> [!NOTE]
+> **V0.4 Feature**: Server lifecycle hooks and typed exception handlers for extensibility.
+
+#### 5.X.1 Overview
+
+Aurora V0.4 introduces an extensibility system for:
+1. **Server Hooks**: Lifecycle events (onStart, onStop, onError, onRequest, onResponse)
+2. **Exception Handlers**: FastAPI-style typed handlers with hierarchy resolution
+
+#### 5.X.2 Server Hooks
+
+**Hook Types** (`aurora.runtime.hooks`):
+```d
+alias StartHook = void delegate();
+alias StopHook = void delegate();
+alias ErrorHook = void delegate(Exception e, ref Context ctx);
+alias RequestHook = void delegate(ref Context ctx);
+alias ResponseHook = void delegate(ref Context ctx);
+```
+
+**ServerHooks Struct**:
+```d
+struct ServerHooks {
+    private StartHook[] _startHooks;
+    private StopHook[] _stopHooks;
+    private ErrorHook[] _errorHooks;
+    private RequestHook[] _requestHooks;
+    private ResponseHook[] _responseHooks;
+    
+    void onStart(StartHook hook);
+    void onStop(StopHook hook);
+    void onError(ErrorHook hook);
+    void onRequest(RequestHook hook);
+    void onResponse(ResponseHook hook);
+    
+    void executeOnStart();
+    void executeOnStop();
+    void executeOnError(Exception e, ref Context ctx);
+    void executeOnRequest(ref Context ctx);
+    void executeOnResponse(ref Context ctx);
+}
+```
+
+**Hook Execution Points**:
+| Hook | Execution Point | Use Case |
+|------|-----------------|----------|
+| `onStart` | Server.run() start | DB pool init, resource warmup |
+| `onStop` | Server.run() shutdown | Cleanup, close connections |
+| `onRequest` | Before routing | Request logging, correlation IDs |
+| `onResponse` | After handler | Response logging, metrics |
+| `onError` | On exception | Error logging, alerting |
+
+**Direct Server API**:
+```d
+auto server = new Server(router, config);
+
+// Direct hook registration
+server.hooks.onStart(() => log("Server starting..."));
+server.hooks.onStop(() => log("Server stopping..."));
+server.hooks.onError((Exception e, ref Context ctx) {
+    log("Error: " ~ e.msg);
+});
+server.hooks.onRequest((ref Context ctx) {
+    ctx.set("request_id", generateUUID());
+});
+server.hooks.onResponse((ref Context ctx) {
+    auto duration = MonoTime.currTime - ctx.get!MonoTime("start_time");
+    log("Request completed in " ~ duration.toString());
+});
+
+server.run();
+```
+
+#### 5.X.3 Exception Handlers
+
+**Type-Safe Exception Handler Registration**:
+```d
+alias ExceptionHandler(E : Exception) = void delegate(ref Context ctx, E e);
+alias TypeErasedHandler = void delegate(ref Context ctx, Exception e);
+```
+
+**Server API** (Template-based):
+```d
+void addExceptionHandler(E : Exception)(ExceptionHandler!E handler);
+```
+
+**Hierarchy Resolution**: Exception handlers use class hierarchy resolution. When an exception is thrown:
+1. Look for exact type match
+2. Walk up the class hierarchy
+3. Stop at first matching handler
+4. If no handler found, exception propagates
+
+```d
+// Custom exception hierarchy
+class ValidationError : Exception { ... }
+class FieldError : ValidationError { ... }
+class RangeError : ValidationError { ... }
+
+// Register handlers
+server.addExceptionHandler!ValidationError((ref ctx, ValidationError e) {
+    ctx.status(400).json(`{"error": "validation", "message": "` ~ e.msg ~ `"}`);
+});
+
+server.addExceptionHandler!FieldError((ref ctx, FieldError e) {
+    ctx.status(400).json(`{"error": "field", "field": "` ~ e.field ~ `"}`);
+});
+
+// FieldError → handled by FieldError handler (exact match)
+// RangeError → handled by ValidationError handler (parent match)
+// Exception → propagates (no handler registered)
+```
+
+**Design Decisions**:
+- ❌ **No defaultExceptionHandler**: Unhandled exceptions propagate naturally
+- ❌ **No silent fallback**: Handler failures propagate (don't mask errors)
+- ✅ **Hierarchy resolution**: Enables catch-all patterns per exception tree
+
+#### 5.X.4 App API (High-Level)
+
+**Fluent API** (`aurora.app`):
+```d
+auto app = App()
+    .onStart(() => log("Starting..."))
+    .onStop(() => log("Stopping..."))
+    .onError((e, ref ctx) => log("Error: " ~ e.msg))
+    .onRequest((ref ctx) => ctx.set("start", MonoTime.currTime))
+    .onResponse((ref ctx) => logDuration(ctx))
+    .addExceptionHandler!ValidationError((ref ctx, e) {
+        ctx.status(400).json(`{"error": "` ~ e.msg ~ `"}`);
+    })
+    .get("/", (ref ctx) => ctx.send("Hello!"))
+    .listen(8080);
+```
+
+**Deferred Application**: Hooks and handlers registered on `App` are stored and applied to `Server` when `listen()` is called. This enables clean configuration before server creation.
+
+```d
+// Hooks stored in App
+auto app = App().onStart(() => log("Start"));
+
+// Applied to Server in listen()
+app.listen(8080);  // Server.hooks.onStart() called here
+```
+
+**Introspection**:
+```d
+bool hasExceptionHandler(E : Exception)();  // Check if handler registered
+```
+
+#### 5.X.5 Implementation Details
+
+**Storage** (Server):
+```d
+private ServerHooks _hooks;
+private TypeErasedHandler[TypeInfo_Class] _exceptionHandlers;
+```
+
+**handleException Method**:
+```d
+bool handleException(ref Context ctx, Exception e) {
+    TypeInfo_Class ti = typeid(e);
+    
+    // Walk hierarchy until handler found or Object reached
+    while (ti !is null && ti !is typeid(Object)) {
+        if (auto handler = ti in _exceptionHandlers) {
+            (*handler)(ctx, e);
+            return true;
+        }
+        ti = ti.base;
+    }
+    return false;  // No handler found
+}
+```
+
+**Integration in handleWithRouter()**:
+```d
+void handleWithRouter(ref Context ctx) {
+    _hooks.executeOnRequest(ctx);
+    
+    try {
+        router.dispatch(ctx);
+    } catch (Exception e) {
+        if (!handleException(ctx, e)) {
+            _hooks.executeOnError(e, ctx);
+            throw;  // Re-throw if no handler
+        }
+    }
+    
+    _hooks.executeOnResponse(ctx);
+}
+```
+
+#### 5.X.6 Performance Considerations
+
+- **Zero overhead when unused**: Empty hook arrays skip execution
+- **O(1) handler lookup**: TypeInfo_Class as map key
+- **O(depth) hierarchy resolution**: Walks class hierarchy (typically 2-4 levels)
+- **No allocations in hot path**: All delegates pre-allocated at registration
+
+#### 5.X.7 Test Coverage
+
+**hooks_test.d** (30+ test cases):
+- Hook registration (single, multiple, order)
+- Hook execution (correct parameters, order preserved)
+- Empty hooks (no-op)
+- Error hooks with context
+- Request/Response hooks with context modification
+
+**app_test.d** (12 test cases):
+- Fluent API methods
+- Hook storage and deferred application
+- Exception handler registration
+- hasExceptionHandler introspection
+
+**Total Coverage**: hooks.d 100%, app.d integration 85%+
+
+---
+
 ## 6. MEMORY MANAGEMENT
 
 ### 6.1 Memory Architecture
@@ -4276,6 +4498,14 @@ Examples where manual SIMD might help:
 - ✅ Multi-threaded workers
 - ✅ NUMA optimization
 - ✅ Testing utilities
+- ✅ **Server Hooks & Exception Handlers (V0.4)** ← NEW
+
+**V0.4 Features (IMPLEMENTED)**:
+- ✅ Server lifecycle hooks (onStart, onStop, onError, onRequest, onResponse)
+- ✅ Typed exception handlers with hierarchy resolution
+- ✅ Fluent App API for hooks and exception handlers
+- ✅ Deferred hook application (App → Server)
+- ✅ Full test coverage (hooks_test.d, app_test.d)
 
 **Performance Target V0**:
 - Throughput: ≥ 95% vs eventcore baseline

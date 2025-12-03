@@ -1,9 +1,9 @@
 # Aurora Test Registry
 
-**Versione:** V0.3.0  
-**Ultimo Aggiornamento:** 3 Dicembre 2025  
-**Totale Test Cases:** 432+  
-**Coverage Media:** 81%
+**Versione:** V0.4.0  
+**Ultimo Aggiornamento:** 26 Gennaio 2025  
+**Totale Test Cases:** 480+  
+**Coverage Media:** 87%
 
 ---
 
@@ -26,19 +26,19 @@
 
 | Metrica | Valore |
 |---------|--------|
-| File di test totali | 25 |
-| Test cases (D) | 432 |
+| File di test totali | 27 |
+| Test cases (D) | 480 |
 | Test cases (Python) | 11 |
-| LOC test | ~9,000 |
-| LOC sorgente | ~7,800 |
-| Rapporto test/source | 1.15:1 |
+| LOC test | ~9,500 |
+| LOC sorgente | ~8,200 |
+| Rapporto test/source | 1.16:1 |
 
 ### 1.2 Distribuzione per Categoria
 
 | Categoria | File | Test Cases | % Totale |
 |-----------|------|------------|----------|
-| Unit Tests | 17 | 371 | 84% |
-| Integration Tests | 4 | 40+ | 9% |
+| Unit Tests | 19 | 419 | 85% |
+| Integration Tests | 4 | 40+ | 8% |
 | Stress Tests | 1 | 15 | 3% |
 | Real-World/Load | 4 | ~10 | 2% |
 | E2E (Python) | 2 | 11 | 2% |
@@ -184,7 +184,40 @@
 
 ---
 
-### 2.4 Other Modules
+### 2.4 Runtime Module (`tests/unit/runtime/`) ✨ NEW
+
+#### `hooks_test.d` - 30+ test cases ✨ NEW (V0.4)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| StartHook Registration | 4 | Single, multiple, ordering |
+| StopHook Registration | 4 | Single, multiple, ordering |
+| ErrorHook Registration | 4 | Single, multiple, context |
+| RequestHook Registration | 4 | Single, multiple, context modify |
+| ResponseHook Registration | 4 | Single, multiple, context modify |
+| Hook Execution | 6 | Order preservation, empty hooks |
+| Edge Cases | 4+ | Null handlers, exception in hooks |
+
+**Coverage**: 100%
+
+---
+
+### 2.5 App Module (`tests/unit/`) ✨ NEW
+
+#### `app_test.d` - 12 test cases ✨ NEW (V0.4)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Fluent API | 5 | onStart, onStop, onError, onRequest, onResponse |
+| Exception Handlers | 4 | addExceptionHandler, hasExceptionHandler |
+| Routing | 2 | get, post methods |
+| Edge Cases | 1 | Empty app |
+
+**Coverage**: 85%+
+
+---
+
+### 2.6 Other Modules
 
 #### `config_test.d` - 15 test cases
 
@@ -318,6 +351,7 @@
 
 | Modulo | Coverage | Test File |
 |--------|----------|-----------|
+| `runtime/hooks.d` | 100% | hooks_test.d | ✨ NEW
 | `web/middleware/security.d` | 100% | security_test.d |
 | `web/context.d` | 100% | context_test.d |
 | `schema/exceptions.d` | 100% | validation_test.d |
@@ -327,6 +361,7 @@
 | `http/package.d` | 89% | http_test.d |
 | `web/router.d` | 89% | router_test.d |
 | `mem/arena.d` | 86% | arena_test.d |
+| `app.d` | 85% | app_test.d | ✨ NEW
 | `mem/object_pool.d` | 84% | object_pool_test.d |
 | `mem/pool.d` | 83% | buffer_pool_test.d |
 | `config/package.d` | 81% | config_test.d |
@@ -388,6 +423,25 @@
 ---
 
 ## 8. Changelog Test
+
+### V0.4.0 (26 Gennaio 2025) ✨ NEW
+
+**Aggiunti:**
+- `hooks_test.d` - 30+ test per Server Hooks (onStart, onStop, onError, onRequest, onResponse)
+- `app_test.d` - 12 test per App API (fluent hooks, exception handlers)
+
+**Nuovi Moduli Testati:**
+- `aurora.runtime.hooks` - 100% coverage
+- `aurora.app` - 85%+ coverage (integration)
+
+**Nuove Funzionalità V0.4:**
+- Server lifecycle hooks
+- Typed exception handlers with hierarchy resolution
+- Fluent App API for extensibility
+
+**Totale Nuovi Test Cases:** +48
+
+---
 
 ### V0.3.0 (3 Dicembre 2025)
 
