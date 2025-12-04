@@ -15,8 +15,7 @@ module aurora.web.middleware.validation;
 import aurora.web.middleware;
 import aurora.web.context;
 import aurora.http;
-// TODO: Complete schema implementation
-// import aurora.core.schema;
+import std.json : JSONValue, JSONType, parseJSON, JSONException;
 
 /**
  * ValidationMiddleware - Schema-based request validation
@@ -25,6 +24,9 @@ class ValidationMiddleware(Schema)
 {
     string errorMessage = "Validation failed";
     
+    // Callback to receive validated data (since storage can't hold structs)
+    void delegate(Schema) onValidated;
+    
     /**
      * Handle request (middleware interface)
      */
@@ -32,8 +34,15 @@ class ValidationMiddleware(Schema)
     {
         try
         {
+            // Check for null request
+            if (ctx.request is null)
+            {
+                sendValidationError(ctx, "Request is null");
+                return;
+            }
+            
             // Parse request body as JSON
-            auto bodyStr = cast(string)ctx.request.body;
+            auto bodyStr = ctx.request.body;
             
             // Handle empty body
             if (bodyStr.length == 0)
@@ -43,14 +52,16 @@ class ValidationMiddleware(Schema)
             }
             
             // Parse JSON
-            import std.json : parseJSON, JSONException;
             auto jsonData = parseJSON(bodyStr);
             
             // Validate against schema
             Schema validated = validateJSON!Schema(jsonData);
             
-            // Store validated data in context
-            ctx.storage.set("validated", validated);
+            // Call callback if set (alternative to storage)
+            if (onValidated !is null)
+            {
+                onValidated(validated);
+            }
             
             // Call next middleware/handler
             next();
@@ -83,7 +94,7 @@ class ValidationMiddleware(Schema)
         // Create JSON error response
         import std.format : format;
         string errorJson = format(`{"error":"%s","status":400}`, message);
-        ctx.response.body = cast(ubyte[])errorJson;
+        ctx.response.setBody(errorJson);
         ctx.response.setHeader("Content-Type", "application/json");
     }
 }
@@ -102,9 +113,8 @@ class ValidationException : Exception
 /**
  * Validate JSON against schema
  */
-Schema validateJSON(Schema)(ref const std.json.JSONValue json)
+Schema validateJSON(Schema)(ref const JSONValue json)
 {
-    import std.json : JSONType;
     import std.traits : Fields, FieldNameTuple;
     import std.conv : to;
     

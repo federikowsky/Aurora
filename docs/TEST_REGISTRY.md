@@ -1,8 +1,9 @@
 # Aurora Test Registry
 
-**Versione:** V0.4.0  
-**Ultimo Aggiornamento:** 26 Gennaio 2025  
-**Totale Test Cases:** 480+  
+**Versione:** V0.5.0 "Solid Foundation"  
+**Ultimo Aggiornamento:** 4 Dicembre 2025  
+**Totale Test Cases:** 540+  
+**Test Modules:** 31  
 **Coverage Media:** 87%
 
 ---
@@ -26,22 +27,34 @@
 
 | Metrica | Valore |
 |---------|--------|
-| File di test totali | 27 |
-| Test cases (D) | 480 |
+| File di test totali | 31 |
+| Test cases (D) | 540+ |
 | Test cases (Python) | 11 |
-| LOC test | ~9,500 |
-| LOC sorgente | ~8,200 |
-| Rapporto test/source | 1.16:1 |
+| LOC test | ~10,200 |
+| LOC sorgente | ~8,400 |
+| Rapporto test/source | 1.21:1 |
 
 ### 1.2 Distribuzione per Categoria
 
 | Categoria | File | Test Cases | % Totale |
 |-----------|------|------------|----------|
-| Unit Tests | 19 | 419 | 85% |
-| Integration Tests | 4 | 40+ | 8% |
-| Stress Tests | 1 | 15 | 3% |
-| Real-World/Load | 4 | ~10 | 2% |
-| E2E (Python) | 2 | 11 | 2% |
+| Unit Tests | 23 | 480+ | 87% |
+| Integration Tests | 6 | 60+ | 11% |
+| Stress Tests | 1 | 15 | 2% |
+| Real-World/Load | 4 | ~10 | <1% |
+
+### 1.3 V0.5 New Tests
+
+| File | Test Cases | Category |
+|------|------------|----------|
+| `ratelimit_test.d` | 25 | Middleware |
+| `requestid_test.d` | 25 | Middleware |
+| `percentile_test.d` | 25 | Metrics |
+| `graceful_shutdown_test.d` | 10 | Integration |
+| `fiber_isolation_test.d` | 20 | Integration |
+| `connection_limits_test.d` | 20 | Integration |
+| `logger_test.d` | 20 | Re-enabled |
+| `validation_test.d` | 20 | Re-enabled |
 
 ---
 
@@ -49,7 +62,7 @@
 
 ### 2.1 HTTP Module (`tests/unit/http/`)
 
-#### `http_test.d` - 66 test cases
+#### `http_test.d` - 106 test cases
 
 | # | Test Name | Categoria | Descrizione |
 |---|-----------|-----------|-------------|
@@ -59,46 +72,60 @@
 | 31-41 | Header Handling | Headers | Case-insensitive, duplicates |
 | 42-55 | **HTTP Smuggling** | **Security** | OWASP WSTG-INPV-15 |
 | 56-66 | Response Methods | API | buildInto, estimateSize, getters |
+| 67-76 | **RFC 7230** | **Compliance** | Host + Content-Length validation |
+| 77-86 | **RFC 7230** | **Compliance** | Transfer-Encoding, body handling |
+| 87-96 | **WSTG-INPV-03** | **Security** | HTTP Verb Tampering |
+| 97-106 | **WSTG-INPV-04** | **Security** | HTTP Parameter Pollution |
 
-**Test HTTP Smuggling (42-55):**
+**RFC 7230 Host Header Tests (67-71):**
 
-| # | Test | OWASP | Descrizione |
-|---|------|-------|-------------|
-| 42 | `duplicate content length rejected` | WSTG-INPV-15 | Doppio Content-Length |
-| 43 | `conflicting content lengths rejected` | WSTG-INPV-15 | Content-Length conflittuali |
-| 44 | `transfer encoding with content length` | WSTG-INPV-15 | TE + CL simultanei |
-| 45 | `chunked transfer encoding rejected` | WSTG-INPV-15 | Chunked TE non supportato |
-| 46 | `multiple transfer encodings rejected` | WSTG-INPV-15 | TE multipli |
-| 47 | `obfuscated transfer encoding rejected` | WSTG-INPV-15 | TE offuscato |
-| 48 | `crlf injection in header value rejected` | WSTG-INPV-15 | CRLF injection |
-| 49 | `null byte in header rejected` | WSTG-INPV-15 | Null byte injection |
-| 50 | `host header injection rejected` | WSTG-INPV-17 | Host manipulation |
-| 51 | `multiple host headers rejected` | WSTG-INPV-17 | Doppio Host |
-| 52 | `invalid http version rejected` | RFC 7230 | Versione HTTP invalida |
-| 53 | `http 0.9 rejected` | Security | HTTP/0.9 non supportato |
-| 54 | `negative content length rejected` | Security | Content-Length negativo |
-| 55 | `overflow content length rejected` | Security | Content-Length overflow |
+| # | Test | Descrizione |
+|---|------|-------------|
+| 67 | `missing Host header rejected HTTP/1.1` | HTTP/1.1 richiede Host |
+| 68 | `multiple Host headers rejected` | Solo un Host consentito |
+| 69 | `Host with port accepted` | `host:8080` valido |
+| 70 | `empty Host header rejected` | Host vuoto non valido |
+| 71 | `Host header case insensitive` | `host:` = `Host:` |
 
----
+**RFC 7230 Content-Length Tests (72-76):**
 
-### 2.2 Web Module (`tests/unit/web/`)
+| # | Test | Descrizione |
+|---|------|-------------|
+| 72 | `negative Content-Length rejected` | CL < 0 non valido |
+| 73 | `non-numeric Content-Length rejected` | CL deve essere numerico |
+| 74 | `duplicate Content-Length rejected` | Solo un CL consentito |
+| 75 | `Content-Length matches body` | CL deve corrispondere |
+| 76 | `Transfer-Encoding with CL rejected` | TE+CL non consentiti |
 
-#### `router_test.d` - 35 test cases
+**OWASP WSTG-INPV-03 HTTP Verb Tampering Tests (87-96):** ✨ NEW (V0.5)
 
-| Categoria | # Test | Descrizione |
-|-----------|--------|-------------|
-| Basic Routing | 10 | GET, POST, PUT, DELETE, PATCH |
-| Path Parameters | 8 | `:id`, `:name`, multiple params |
-| Wildcard Routes | 5 | `*`, catch-all |
-| Route Priority | 5 | Static vs dynamic |
-| Edge Cases | 7 | Empty path, trailing slash |
+| # | Test | Descrizione |
+|---|------|-------------|
+| 87 | `Unknown HTTP method rejected` | Metodi custom rifiutati |
+| 88 | `Method case sensitivity - lowercase` | `get` rifiutato |
+| 89 | `Mixed case method rejected` | `GeT` rifiutato |
+| 90 | `X-HTTP-Method-Override header parsing` | Header override riconosciuto |
+| 91 | `X-Method-Override header parsing` | Variante X-Method-Override |
+| 92 | `DEBUG method rejected` | Metodo IIS DEBUG rifiutato |
+| 93 | `TRACE method parsed` | TRACE gestito (XST awareness) |
+| 94 | `TRACK method rejected` | Metodo MS-specific rifiutato |
+| 95 | `Method with null byte rejected` | Null byte injection prevenuta |
+| 96 | `Very long method name rejected` | DoS via long method prevenuto |
 
-#### `router_pattern_test.d` - 25 test cases
+**OWASP WSTG-INPV-04 HTTP Parameter Pollution Tests (97-106):** ✨ NEW (V0.5)
 
-| Categoria | # Test | Descrizione |
-|-----------|--------|-------------|
-| Pattern Matching | 10 | Exact, prefix, suffix |
-| Regex Patterns | 5 | Custom regex constraints |
+| # | Test | Descrizione |
+|---|------|-------------|
+| 97 | `Duplicate query parameters` | `id=1&id=2&id=3` preservato |
+| 98 | `Mixed case parameter names` | `ID=1&id=2&Id=3` preservato |
+| 99 | `URL encoded duplicate parameters` | `id=1&%69%64=2` preservato |
+| 100 | `Array-style parameters` | `ids[]=1&ids[]=2` preservato |
+| 101 | `Query and body parameter conflict` | Query vs body separati |
+| 102 | `Null byte in parameter value` | Null byte preservato per sanitize |
+| 103 | `Parameter without value` | `admin&debug` valido |
+| 104 | `Empty parameter value` | `admin=&debug=` valido |
+| 105 | `Semicolon as parameter separator` | `id=1;admin=true` preservato |
+| 106 | `Multiple equals signs in value` | `token=abc==` preservato |
 | Segment Extraction | 5 | Path segment parsing |
 | Performance | 5 | Matching speed benchmarks |
 
@@ -152,9 +179,82 @@
 | Credentials | 3 | withCredentials support |
 | Edge Cases | 2 | Malformed origins |
 
+#### `logger_test.d` - 20 test cases ✨ NEW (V0.5)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Creation | 3 | LoggerMiddleware, custom log function |
+| Logging Behavior | 5 | Method, path, status logging |
+| Format Tests | 3 | SIMPLE, JSON, COLORED formats |
+| Null Safety | 2 | Null request/response handling |
+| Duration | 1 | Duration measurement |
+| Error Handling | 1 | Exception logging |
+| Color Settings | 2 | Enable/disable colors |
+| HTTP Methods | 3 | POST, PUT, DELETE logging |
+
+#### `validation_test.d` - 20 test cases ✨ NEW (V0.5)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| validateJSON | 8 | Simple, nested, bool, array schemas |
+| Middleware Creation | 3 | ValidationMiddleware, helper |
+| Exception | 1 | ValidationException creation |
+| Middleware Config | 2 | Custom error message |
+| Array Validation | 2 | Empty array, wrong element type |
+| Edge Cases | 4 | Extra fields, null context, unicode |
+
+#### `ratelimit_test.d` - 25 test cases ✨ NEW (V0.5)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Basic Rate Limiting | 5 | Within limit, exceeded, burst |
+| Token Bucket | 5 | Token consumption, refill |
+| Response Codes | 3 | 429 Too Many Requests |
+| Headers | 3 | Retry-After, X-RateLimit-* |
+| Per-Client | 5 | IP extraction, X-Forwarded-For |
+| Custom Keys | 2 | API key, custom extractor |
+| Edge Cases | 2 | Empty IP, malformed headers |
+
+#### `requestid_test.d` - 25 test cases ✨ NEW (V0.5)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Basic Functionality | 5 | Creation, UUID generation |
+| ID Preservation | 5 | Existing ID, validation |
+| Custom Config | 4 | Header name, storage key, generator |
+| Validation | 6 | UUID format, alphanumeric, length |
+| Pipeline Integration | 3 | Middleware chain, availability |
+| Factory Functions | 2 | requestIdMiddleware() variants |
+
 ---
 
-### 2.3 Memory Module (`tests/unit/mem/`)
+### 2.3 Metrics Module (`tests/unit/metrics/`)
+
+#### `metrics_test.d` - 25 test cases
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Counter | 5 | Increment, reset |
+| Gauge | 5 | Set, increment, decrement |
+| Histogram | 5 | Observe, buckets |
+| Registry | 5 | Get/create metrics |
+| Prometheus Export | 5 | Format, labels |
+
+#### `percentile_test.d` - 25 test cases ✨ NEW (V0.5)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Basic Operations | 5 | Create, observe, count, sum |
+| Percentile Calculation | 5 | P50, P90, P95, P99, custom |
+| Edge Cases | 5 | Single value, empty, reset |
+| Registry Integration | 3 | Metrics.percentileHistogram() |
+| Prometheus Export | 3 | Format with quantile labels |
+| Latency Patterns | 2 | Typical usage, skewed data |
+| Thread Safety | 2 | Concurrent observations |
+
+---
+
+### 2.4 Memory Module (`tests/unit/mem/`)
 
 #### `buffer_pool_test.d` - 36 test cases
 
@@ -272,7 +372,35 @@
 
 ## 3. Integration Tests
 
-### `server_integration_test.d` - 20 test cases ✨ UPDATED
+### `graceful_shutdown_test.d` - 10 test cases ✨ NEW (V0.5)
+
+| # | Test | Descrizione |
+|---|------|-------------|
+| 1-2 | Signal Handling | SIGTERM, SIGINT response |
+| 3-4 | In-Flight Requests | Request completion before shutdown |
+| 5-6 | Timeout Behavior | Shutdown timeout, forced termination |
+| 7-8 | State Transitions | Running → Stopping → Stopped |
+| 9-10 | Cleanup | Resource release, socket cleanup |
+
+### `fiber_isolation_test.d` - 20 test cases ✨ NEW (V0.5)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Request Isolation | 5 | Fiber-per-request isolation |
+| Crash Containment | 5 | Exception doesn't crash server |
+| State Isolation | 5 | No data leakage between requests |
+| Recovery | 5 | Fiber pool recovery after error |
+
+### `connection_limits_test.d` - 20 test cases ✨ NEW (V0.5)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Max Connections | 5 | Connection limit enforcement |
+| Graceful Rejection | 5 | 503 Service Unavailable |
+| Connection Stats | 5 | Active connections API |
+| Connection Reuse | 5 | Keep-alive behavior |
+
+### `server_integration_test.d` - 20 test cases
 
 | # | Test | Categoria | Descrizione |
 |---|------|-----------|-------------|
@@ -317,6 +445,25 @@
 | test_worker_distribution | Load balancing |
 | test_worker_crash_recovery | Resilience |
 | test_graceful_shutdown | Clean shutdown |
+
+### `fiber_isolation_test.py` - 10 test cases ✨ NEW (V0.5)
+
+| Test | Descrizione |
+|------|-------------|
+| test_concurrent_requests | Multiple simultaneous requests |
+| test_crash_isolation | Single request crash containment |
+| test_memory_isolation | No shared state leakage |
+| test_recovery | Server continues after error |
+| test_performance | No isolation overhead |
+
+### `graceful_shutdown_test.py` - 5 test cases ✨ NEW (V0.5)
+
+| Test | Descrizione |
+|------|-------------|
+| test_sigterm_handling | SIGTERM triggers shutdown |
+| test_inflight_completion | Requests complete before exit |
+| test_timeout | Forced shutdown after timeout |
+| test_clean_exit | Exit code 0 on success |
 
 ---
 

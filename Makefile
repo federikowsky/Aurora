@@ -56,6 +56,8 @@ help:
 	@echo "  make all           - Build library (default)"
 	@echo "  make lib           - Build static library"
 	@echo "  make test          - Run tests via DUB"
+	@echo "  make test-cov      - Run tests with coverage (output in coverage/)"
+	@echo "  make clean-cov     - Clean coverage files"
 	@echo "  make examples      - Build example servers"
 	@echo "  make clean         - Remove all build artifacts"
 	@echo "  make info          - Show build configuration"
@@ -100,6 +102,25 @@ test: check-wire check-fastjsond
 	@echo "Running tests via DUB..."
 	@dub test
 
+# Run tests with coverage (outputs to coverage/ folder)
+test-cov: check-wire check-fastjsond
+	@echo "Running tests with coverage..."
+	@mkdir -p coverage
+	@dub test --build=unittest-cov
+	@echo "Moving coverage files to coverage/..."
+	@find . -maxdepth 1 -name "*.lst" -exec mv {} coverage/ \; 2>/dev/null || true
+	@find . -maxdepth 1 -name "..-*" -name "*.lst" -exec mv {} coverage/ \; 2>/dev/null || true
+	@mv ..-*.lst coverage/ 2>/dev/null || true
+	@echo "✓ Coverage files in coverage/"
+	@echo "  To view: ls coverage/*.lst"
+
+# Clean coverage files
+clean-cov:
+	@echo "Cleaning coverage files..."
+	@rm -rf coverage/*.lst
+	@rm -f *.lst ..-*.lst
+	@echo "✓ Coverage files cleaned"
+
 # ============================================================================
 # Examples (Pattern Rule - builds any example automatically)
 # ============================================================================
@@ -124,6 +145,8 @@ clean:
 	@echo "Cleaning build artifacts..."
 	@rm -rf $(BUILD_DIR)
 	@rm -f aurora libaurora.a
+	@rm -rf coverage/*.lst
+	@rm -f *.lst ..-*.lst
 	@echo "✓ Clean complete"
 
 # Show build info

@@ -56,7 +56,7 @@
             ],
             "mainSourceFile": "tests/runner.d",
             "excludedSourceFiles": [
-                "tests/unit/web/middleware.disabled/*",
+                
                 "tests/realworld/*",
                 "tests/stress/*"
             ],
@@ -83,7 +83,7 @@
             ],
             "mainSourceFile": "tests/runner.d",
             "excludedSourceFiles": [
-                "tests/unit/web/middleware.disabled/*",
+                
                 "tests/realworld/*",
                 "tests/stress/*"
             ],

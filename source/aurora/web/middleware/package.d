@@ -86,5 +86,7 @@ class MiddlewarePipeline
 
 public import aurora.web.middleware.cors;
 public import aurora.web.middleware.logger;
+public import aurora.web.middleware.ratelimit;
+public import aurora.web.middleware.requestid;
 public import aurora.web.middleware.security;
 public import aurora.web.middleware.validation;
