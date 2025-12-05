@@ -7,6 +7,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] - v0.6.0 "Enterprise Hardening"
+
+Enterprise-grade stability features for high-load deployments.
+
+### Added
+
+#### Connection Limits & Backpressure
+- **`maxConnections`** - Hard limit on concurrent connections (default: 10,000)
+- **Hysteresis mechanism** - High/low water marks (80%/60%) prevent oscillation
+- **In-flight request limiting** - `maxInFlightRequests` prevents server overload
+- **HTTP 503 with Retry-After** - Graceful rejection when overloaded
+- **`OverloadBehavior` enum** - Choose between `reject503`, `closeConnection`, `queueRequest`
+
+#### Backpressure Metrics
+- `server.isInOverload()` - Current overload state
+- `server.getRejectedOverload()` - Connections rejected due to overload
+- `server.getRejectedInFlight()` - Requests rejected due to in-flight limit
+- `server.getOverloadTransitions()` - Times server entered overload state
+- `server.getConnectionUtilization()` - Current connection ratio (0.0-1.0)
+- `server.getConnectionHighWaterMark()` - Absolute high water threshold
+- `server.getConnectionLowWaterMark()` - Absolute low water threshold
+
+#### Kubernetes Health Probes (`aurora.web.middleware.health`)
+- **`HealthMiddleware`** - Configurable health check middleware
+- **Liveness probe** (`/health/live`) - Simple "process alive" check
+- **Readiness probe** (`/health/ready`) - Checks startup, overload, custom deps
+- **Startup probe** (`/health/startup`) - Track initialization completion
+- **Custom readiness checks** - Pluggable database/cache/service checks
+- **`HealthConfig`** - Configurable paths, detail level, caching
+- **`HealthCheckResult`** - Structured check results with timing
+- Integration with `server.isInOverload()` for automatic traffic shedding
+
+#### Load Shedding Middleware (`aurora.web.middleware.loadshed`)
+- **`LoadSheddingMiddleware`** - HTTP-level overload protection
+- **Hysteresis-based shedding** - Prevents oscillation with high/low water marks
+- **Probabilistic shedding** - Gradual degradation proportional to load
+- **Bypass paths** - Critical endpoints skip shedding (glob patterns: `/health/*`)
+- **`LoadSheddingConfig`** - Utilization thresholds, in-flight limits, bypass paths
+- **`LoadSheddingStats`** - Track shed/bypassed/allowed requests
+- Integration with `server.getConnectionUtilization()` for load awareness
+
+#### Circuit Breaker Middleware (`aurora.web.middleware.circuitbreaker`)
+- **`CircuitBreakerMiddleware`** - Failure isolation to prevent cascading failures
+- **Three-state machine** - CLOSED → OPEN → HALF_OPEN → CLOSED recovery cycle
+- **Configurable thresholds** - Failure count to open, success count to close
+- **Automatic recovery** - Reset timeout triggers HALF_OPEN test state
+- **Bypass paths** - Critical endpoints skip circuit breaker (glob patterns)
+- **Status code detection** - Configurable failure status codes (default: 5xx)
+- **`CircuitBreakerConfig`** - Thresholds, timeouts, bypass paths, retry-after
+- **`CircuitBreakerStats`** - Track opens/closes, failures, rejected requests
+- **Thread-safe** - Atomic operations for concurrent request handling
+- **503 with X-Circuit-State** - Clear signaling when circuit is open
+
+#### Distributed Tracing (`aurora.tracing`)
+- **W3C Trace Context** - Full Level 1 compliance for `traceparent` header
+- **`TraceContext`** - Parse, generate, and propagate trace context
+  - `parse()` - Parse incoming traceparent headers
+  - `generate()` - Create new trace context with random IDs
+  - `child()` - Create child context (same trace-id, new span-id)
+  - `toTraceparent()` - Serialize to W3C format
+- **`Span`** - Request span with timing and metadata
+  - Timing: `startTime`, `endTime`, `getDuration()`
+  - Attributes: string, long, bool, double values
+  - Events: timestamped events with attributes
+  - Status: UNSET, OK, ERROR with message
+  - Kinds: INTERNAL, SERVER, CLIENT, PRODUCER, CONSUMER
+- **`SpanExporter` interface** - Pluggable export backends
+  - `ConsoleSpanExporter` - Pretty-prints spans (development)
+  - `NoopSpanExporter` - Discards spans (testing)
+  - `BatchingSpanExporter` - Buffers spans for efficient export
+  - `MultiSpanExporter` - Sends to multiple backends
+- **`TracingMiddleware`** - Automatic request tracing
+  - Extracts/generates trace context from headers
+  - Creates server span with HTTP attributes
+  - Configurable sampling probability
+  - Exclude paths (health, metrics)
+- **Helper functions** - `getTraceId()`, `getSpanId()`, `getTraceparent()`
+- **Zero dependencies** - Pure D implementation
+
+#### WebSocket Backpressure (`websocket.backpressure`) — Aurora-WebSocket 1.1.0
+- **`BackpressureWebSocket`** - Wrapper for flow control on WebSocket connections
+- **Send buffer tracking** - `bufferedAmount` property like HTML5 WebSocket API
+- **High/low water marks** - Hysteresis-based state machine (FLOWING → PAUSED → CRITICAL)
+- **Slow client detection** - Automatic detection with configurable timeout
+- **`SlowClientAction`** - DISCONNECT, DROP_MESSAGES, LOG_ONLY, CUSTOM
+- **Message priority queues** - CONTROL > HIGH > NORMAL > LOW ordering
+- **`SendBuffer`** - Thread-safe buffer with priority queue support
+- **Callbacks** - `onDrain`, `onSlowClient`, `onStateChange` events
+- **`BackpressureStats`** - Track buffered amount, dropped messages, state transitions
+
+#### Bulkhead Middleware (`aurora.web.middleware.bulkhead`)
+- **`BulkheadMiddleware`** - Resource isolation pattern from "Release It!"
+- **Per-group concurrency limits** - Isolate /api, /admin, /reports endpoint groups
+- **Semaphore-based control** - Max concurrent requests with optional queueing
+- **Queue with timeout** - Configurable wait time for queued requests
+- **Fail-fast mode** - Set `maxQueue=0` for immediate rejection
+- **`BulkheadState`** - NORMAL, FILLING, OVERLOADED state tracking
+- **`BulkheadConfig`** - maxConcurrent, maxQueue, timeout, name
+- **`BulkheadStats`** - Track active, queued, completed, rejected, timed-out calls
+- **Thread-safe** - Atomic counters with condition variable signaling
+- **503 with X-Bulkhead-Name** - Clear rejection signaling with bulkhead identifier
+
+#### Memory Management (`aurora.mem.pressure`)
+- **`MemoryMonitor`** - Proactive GC heap monitoring and pressure management
+- **`MemoryConfig`** - maxHeapBytes, high/critical water ratios, GC interval
+- **`MemoryState`** - NORMAL (< 80%), PRESSURE (80-95%), CRITICAL (> 95%)
+- **`PressureAction`** - GC_COLLECT, LOG_ONLY, CUSTOM, NONE actions
+- **`MemoryMiddleware`** - Rejects requests in CRITICAL state with 503
+- **Automatic GC.collect()** - Triggered on high water with rate limiting
+- **Pressure callbacks** - Custom handling on state transitions
+- **`MemoryStats`** - usedBytes, gcCollections, rejectedRequests, utilization
+- **Bypass paths** - Health probes exempt from rejection (glob patterns)
+- **Kubernetes integration** - Configure based on container memory limits
+
+### Changed
+- `ServerConfig` extended with backpressure configuration fields
+- Connection handling now checks backpressure before accepting
+
+---
+
 ## [0.5.0] - 2025-12-04 "Solid Foundation"
 
 Production hardening release focused on reliability, RFC compliance, and observability.

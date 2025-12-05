@@ -15,6 +15,7 @@ module tests.integration.connection_limits_test;
 
 import unit_threaded;
 import aurora.runtime.server;
+import aurora.runtime.server : OverloadBehavior;
 import aurora.web.router;
 import aurora.web.context;
 import core.atomic;
@@ -256,6 +257,121 @@ unittest
     
     auto server = new Server(router, config);
     server.shouldNotBeNull;
+}
+
+// ============================================================================
+// BACKPRESSURE API TESTS (V0.6)
+// ============================================================================
+
+// Test: Server has isInOverload API
+@("server has isInOverload API")
+unittest
+{
+    auto server = createTestServer();
+    
+    static assert(__traits(compiles, server.isInOverload()));
+    server.isInOverload().shouldBeFalse;  // Initially not overloaded
+}
+
+// Test: Server has rejectedOverload counter
+@("server has rejectedOverload counter")
+unittest
+{
+    auto server = createTestServer();
+    
+    static assert(__traits(compiles, server.getRejectedOverload()));
+    server.getRejectedOverload().shouldEqual(0);
+}
+
+// Test: Server has rejectedInFlight counter
+@("server has rejectedInFlight counter")
+unittest
+{
+    auto server = createTestServer();
+    
+    static assert(__traits(compiles, server.getRejectedInFlight()));
+    server.getRejectedInFlight().shouldEqual(0);
+}
+
+// Test: Server has overloadTransitions counter
+@("server has overloadTransitions counter")
+unittest
+{
+    auto server = createTestServer();
+    
+    static assert(__traits(compiles, server.getOverloadTransitions()));
+    server.getOverloadTransitions().shouldEqual(0);
+}
+
+// Test: Server has currentInFlightRequests counter
+@("server has currentInFlightRequests counter")
+unittest
+{
+    auto server = createTestServer();
+    
+    static assert(__traits(compiles, server.getCurrentInFlightRequests()));
+    server.getCurrentInFlightRequests().shouldEqual(0);
+}
+
+// Test: Server has connectionUtilization method
+@("server has connectionUtilization method")
+unittest
+{
+    auto server = createTestServer();
+    
+    static assert(__traits(compiles, server.getConnectionUtilization()));
+    auto utilization = server.getConnectionUtilization();
+    utilization.shouldBeGreaterThan(-0.1f);
+    utilization.shouldBeSmallerThan(1.1f);
+}
+
+// Test: Server has water mark getters
+@("server has water mark getters")
+unittest
+{
+    auto router = new Router();
+    router.get("/", (ref Context ctx) { ctx.send("OK"); });
+    
+    ServerConfig config;
+    config.maxConnections = 1000;
+    config.connectionHighWater = 0.8f;
+    config.connectionLowWater = 0.6f;
+    
+    auto server = new Server(router, config);
+    
+    server.getConnectionHighWaterMark().shouldEqual(800);  // 1000 * 0.8
+    server.getConnectionLowWaterMark().shouldEqual(600);   // 1000 * 0.6
+}
+
+// Test: Connection utilization is 0 with no connections
+@("connection utilization is 0 with no connections")
+unittest
+{
+    auto server = createTestServer();
+    server.getConnectionUtilization().shouldEqual(0.0f);
+}
+
+// Test: Backpressure config can be customized
+@("backpressure config can be customized")
+unittest
+{
+    auto router = new Router();
+    router.get("/", (ref Context ctx) { ctx.send("OK"); });
+    
+    ServerConfig config;
+    config.maxConnections = 5000;
+    config.connectionHighWater = 0.9f;
+    config.connectionLowWater = 0.7f;
+    config.maxInFlightRequests = 500;
+    config.overloadBehavior = OverloadBehavior.closeConnection;
+    config.retryAfterSeconds = 10;
+    
+    auto server = new Server(router, config);
+    server.shouldNotBeNull;
+    
+    // Verify water marks are calculated correctly
+    server.getConnectionHighWaterMark().shouldEqual(4500);  // 5000 * 0.9
+    server.getConnectionLowWaterMark().shouldEqual(3500);   // 5000 * 0.7
 }
 
 // ============================================================================

@@ -80,6 +80,19 @@ version(linux) {
 // SERVER CONFIGURATION
 // ============================================================================
 
+/// Behavior when server is overloaded
+enum OverloadBehavior
+{
+    /// Return HTTP 503 Service Unavailable with Retry-After header
+    reject503,
+    
+    /// Close connection immediately without response (faster but less graceful)
+    closeConnection,
+    
+    /// Queue request if possible (bounded, may still reject)
+    queueRequest
+}
+
 /// Server configuration (unchanged API from blocking version)
 struct ServerConfig
 {
@@ -109,6 +122,26 @@ struct ServerConfig
     
     /// Maximum requests per connection (0 = unlimited)
     uint maxRequestsPerConnection = 1000;
+    
+    // === Connection Limits & Backpressure (Enterprise) ===
+    
+    /// Maximum concurrent connections (0 = unlimited, NOT recommended for production)
+    uint maxConnections = 10_000;
+    
+    /// High water mark - start rejecting new connections when this % of maxConnections is reached
+    float connectionHighWater = 0.8;
+    
+    /// Low water mark - resume accepting connections when below this % of maxConnections
+    float connectionLowWater = 0.6;
+    
+    /// Maximum in-flight requests per worker (0 = unlimited)
+    uint maxInFlightRequests = 1000;
+    
+    /// Behavior when server is overloaded
+    OverloadBehavior overloadBehavior = OverloadBehavior.reject503;
+    
+    /// Retry-After header value in seconds (for 503 responses)
+    uint retryAfterSeconds = 5;
     
     static ServerConfig defaults() @safe nothrow
     {
@@ -299,6 +332,13 @@ final class Server
         shared ulong rejectedBodyTooLarge;
         shared ulong rejectedTimeout;
         shared ulong rejectedDuringShutdown;
+        
+        // Backpressure state (Enterprise)
+        shared bool inOverloadState;           // Whether we're in overload mode
+        shared ulong rejectedOverload;         // Connections rejected due to overload
+        shared ulong rejectedInFlight;         // Requests rejected due to in-flight limit
+        shared ulong overloadStateTransitions; // Times we entered overload state
+        shared ulong currentInFlightRequests;  // Current in-flight requests (global)
     }
     
     // ========================================
@@ -347,6 +387,13 @@ final class Server
         atomicStore(rejectedBodyTooLarge, 0UL);
         atomicStore(rejectedTimeout, 0UL);
         atomicStore(rejectedDuringShutdown, 0UL);
+        
+        // Backpressure state
+        atomicStore(inOverloadState, false);
+        atomicStore(rejectedOverload, 0UL);
+        atomicStore(rejectedInFlight, 0UL);
+        atomicStore(overloadStateTransitions, 0UL);
+        atomicStore(currentInFlightRequests, 0UL);
     }
     
     // ========================================
@@ -698,6 +745,60 @@ final class Server
     }
     
     // ========================================
+    // BACKPRESSURE METRICS (Enterprise)
+    // ========================================
+    
+    /// Check if server is currently in overload state
+    bool isInOverload() @safe nothrow
+    {
+        return atomicLoad(inOverloadState);
+    }
+    
+    /// Get connections rejected due to overload
+    ulong getRejectedOverload() @safe nothrow
+    {
+        return atomicLoad(rejectedOverload);
+    }
+    
+    /// Get requests rejected due to in-flight limit
+    ulong getRejectedInFlight() @safe nothrow
+    {
+        return atomicLoad(rejectedInFlight);
+    }
+    
+    /// Get number of times server entered overload state
+    ulong getOverloadTransitions() @safe nothrow
+    {
+        return atomicLoad(overloadStateTransitions);
+    }
+    
+    /// Get current in-flight requests count
+    ulong getCurrentInFlightRequests() @safe nothrow
+    {
+        return atomicLoad(currentInFlightRequests);
+    }
+    
+    /// Get connection utilization ratio (0.0 - 1.0)
+    float getConnectionUtilization() @safe nothrow
+    {
+        if (config.maxConnections == 0) return 0.0f;
+        auto active = getActiveConnections();
+        return cast(float)active / cast(float)config.maxConnections;
+    }
+    
+    /// Get the high water mark threshold (absolute number)
+    uint getConnectionHighWaterMark() const @safe nothrow
+    {
+        return cast(uint)(config.maxConnections * config.connectionHighWater);
+    }
+    
+    /// Get the low water mark threshold (absolute number)
+    uint getConnectionLowWaterMark() const @safe nothrow
+    {
+        return cast(uint)(config.maxConnections * config.connectionLowWater);
+    }
+    
+    // ========================================
     // CONNECTION HANDLING (internal)
     // ========================================
     
@@ -763,6 +864,12 @@ final class Server
             return;
         }
         
+        // === BACKPRESSURE CHECK ===
+        if (!checkAndUpdateBackpressure(conn))
+        {
+            return;  // Connection rejected due to overload
+        }
+        
         atomicOp!"+="(totalConnections, 1);
         atomicOp!"+="(activeConnections, 1);
         
@@ -770,6 +877,9 @@ final class Server
         {
             atomicOp!"-="(activeConnections, 1);
             safeClose(conn);
+            
+            // Check if we should exit overload state (hysteresis)
+            checkOverloadRecovery();
         }
         
         try
@@ -779,6 +889,125 @@ final class Server
         catch (Exception e)
         {
             atomicOp!"+="(totalErrors, 1);
+        }
+    }
+    
+    /// Check backpressure state and decide whether to accept connection
+    /// Returns: true if connection should be accepted, false if rejected
+    private bool checkAndUpdateBackpressure(TCPConnection conn) @safe nothrow
+    {
+        // Skip if maxConnections is 0 (unlimited)
+        if (config.maxConnections == 0) return true;
+        
+        auto currentActive = atomicLoad(activeConnections);
+        auto highMark = getConnectionHighWaterMark();
+        auto lowMark = getConnectionLowWaterMark();
+        
+        // Check if we're already in overload state
+        if (atomicLoad(inOverloadState))
+        {
+            // In overload: only accept if we've recovered below low water mark
+            if (currentActive < lowMark)
+            {
+                // Recovery! Exit overload state
+                atomicStore(inOverloadState, false);
+                // Fall through to accept connection
+            }
+            else
+            {
+                // Still overloaded - reject
+                rejectConnectionOverload(conn);
+                return false;
+            }
+        }
+        
+        // Check if we should enter overload state
+        if (currentActive >= highMark)
+        {
+            // Enter overload state
+            if (!atomicLoad(inOverloadState))
+            {
+                atomicStore(inOverloadState, true);
+                atomicOp!"+="(overloadStateTransitions, 1);
+            }
+            
+            rejectConnectionOverload(conn);
+            return false;
+        }
+        
+        // Check hard limit
+        if (currentActive >= config.maxConnections)
+        {
+            rejectConnectionOverload(conn);
+            return false;
+        }
+        
+        return true;
+    }
+    
+    /// Check if we should exit overload state (called on connection close)
+    private void checkOverloadRecovery() @safe nothrow
+    {
+        if (!atomicLoad(inOverloadState)) return;
+        
+        auto currentActive = atomicLoad(activeConnections);
+        auto lowMark = getConnectionLowWaterMark();
+        
+        if (currentActive < lowMark)
+        {
+            atomicStore(inOverloadState, false);
+        }
+    }
+    
+    /// Reject connection due to overload
+    private void rejectConnectionOverload(TCPConnection conn) @safe nothrow
+    {
+        atomicOp!"+="(rejectedOverload, 1);
+        
+        final switch (config.overloadBehavior)
+        {
+            case OverloadBehavior.reject503:
+                send503Response(conn);
+                safeClose(conn);
+                break;
+                
+            case OverloadBehavior.closeConnection:
+                safeClose(conn);
+                break;
+                
+            case OverloadBehavior.queueRequest:
+                // TODO: Implement request queuing in future version
+                // For now, fall back to 503
+                send503Response(conn);
+                safeClose(conn);
+                break;
+        }
+    }
+    
+    /// Send HTTP 503 response with Retry-After header
+    private void send503Response(TCPConnection conn) @trusted nothrow
+    {
+        try
+        {
+            import std.format : format;
+            
+            immutable string body503 = `{"error":"Service temporarily unavailable","reason":"server_overloaded"}`;
+            auto response = format(
+                "HTTP/1.1 503 Service Unavailable\r\n" ~
+                "Content-Type: application/json\r\n" ~
+                "Retry-After: %d\r\n" ~
+                "Connection: close\r\n" ~
+                "Content-Length: %d\r\n" ~
+                "\r\n%s",
+                config.retryAfterSeconds,
+                body503.length,
+                body503
+            );
+            conn.write(cast(const(ubyte)[])response);
+        }
+        catch (Exception) 
+        {
+            // Ignore write errors on rejection
         }
     }
     
@@ -950,6 +1179,38 @@ final class Server
             
             requestCount++;
             atomicOp!"+="(totalRequests, 1);
+            
+            // === IN-FLIGHT REQUEST LIMIT CHECK ===
+            if (config.maxInFlightRequests > 0)
+            {
+                auto inFlight = atomicOp!"+="(currentInFlightRequests, 1);
+                scope(exit) atomicOp!"-="(currentInFlightRequests, 1);
+                
+                if (inFlight > config.maxInFlightRequests)
+                {
+                    atomicOp!"+="(rejectedInFlight, 1);
+                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    try
+                    {
+                        import std.format : format;
+                        immutable string body429 = `{"error":"Too many requests in flight"}`;
+                        auto response = format(
+                            "HTTP/1.1 503 Service Unavailable\r\n" ~
+                            "Content-Type: application/json\r\n" ~
+                            "Retry-After: %d\r\n" ~
+                            "Connection: close\r\n" ~
+                            "Content-Length: %d\r\n" ~
+                            "\r\n%s",
+                            config.retryAfterSeconds,
+                            body429.length,
+                            body429
+                        );
+                        conn.write(cast(const(ubyte)[])response);
+                    }
+                    catch (Exception) {}
+                    return;
+                }
+            }
             
             // Handle request
             ubyte[] responseData;

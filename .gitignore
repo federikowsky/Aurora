@@ -54,3 +54,5 @@ Thumbs.db
 tests/realworld/multicore_server
 tests/realworld/singlecore_server
 build/
+
+plan.md

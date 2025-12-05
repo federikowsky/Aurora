@@ -84,7 +84,11 @@ class MiddlewarePipeline
     }
 }
 
+public import aurora.web.middleware.bulkhead;
+public import aurora.web.middleware.circuitbreaker;
 public import aurora.web.middleware.cors;
+public import aurora.web.middleware.health;
+public import aurora.web.middleware.loadshed;
 public import aurora.web.middleware.logger;
 public import aurora.web.middleware.ratelimit;
 public import aurora.web.middleware.requestid;

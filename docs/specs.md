@@ -960,6 +960,707 @@ struct ServerConfig {
 - Connection reused for multiple requests
 - Timeout-based idle connection cleanup
 
+#### 5.4.4 Connection Limits & Backpressure (V0.6)
+
+**Status**: ✅ Implemented
+
+Enterprise-grade connection management to prevent cascading failures under high load.
+
+**Configuration**:
+```d
+struct ServerConfig {
+    // === Connection Limits & Backpressure ===
+    
+    /// Maximum concurrent connections (0 = unlimited, NOT recommended)
+    uint maxConnections = 10_000;
+    
+    /// High water mark - start rejecting at this % of maxConnections
+    float connectionHighWater = 0.8;  // 80%
+    
+    /// Low water mark - resume accepting below this % (hysteresis)
+    float connectionLowWater = 0.6;   // 60%
+    
+    /// Maximum in-flight requests (0 = unlimited)
+    uint maxInFlightRequests = 1000;
+    
+    /// Behavior when overloaded
+    OverloadBehavior overloadBehavior = OverloadBehavior.reject503;
+    
+    /// Retry-After header value (seconds)
+    uint retryAfterSeconds = 5;
+}
+
+enum OverloadBehavior {
+    reject503,        // HTTP 503 + Retry-After
+    closeConnection,  // Close immediately (faster)
+    queueRequest      // Queue if possible (future)
+}
+```
+
+**Behavior**:
+
+1. **Hysteresis** prevents oscillation:
+   - When connections reach 80% of max → enter overload state
+   - New connections rejected with 503
+   - When connections drop below 60% → exit overload state
+   - Resume accepting connections
+
+2. **In-flight limiting**:
+   - Tracks concurrent requests being processed
+   - Returns 503 when limit exceeded
+   - Prevents server from being overwhelmed
+
+3. **Graceful rejection**:
+   ```http
+   HTTP/1.1 503 Service Unavailable
+   Content-Type: application/json
+   Retry-After: 5
+   Connection: close
+   
+   {"error":"Service temporarily unavailable","reason":"server_overloaded"}
+   ```
+
+**Metrics Available**:
+```d
+server.isInOverload();              // Current overload state
+server.getRejectedOverload();       // Connections rejected
+server.getRejectedInFlight();       // Requests rejected
+server.getOverloadTransitions();    // Times entered overload
+server.getConnectionUtilization();  // Current % (0.0-1.0)
+```
+
+**Best Practices**:
+- Set `maxConnections` based on available RAM (~50KB per connection)
+- Use `reject503` for API servers (clients can retry)
+- Use `closeConnection` for high-throughput scenarios
+- Monitor `getOverloadTransitions()` to tune water marks
+
+---
+
+#### 5.4.5 Kubernetes Health Probes (V0.6)
+
+**Status**: ✅ Implemented (2025-12-05)
+
+Aurora provides built-in health check middleware for Kubernetes deployments:
+
+**Configuration**:
+```d
+auto healthConfig = HealthConfig();
+healthConfig.livenessPath = "/health/live";      // Default
+healthConfig.readinessPath = "/health/ready";    // Default
+healthConfig.startupPath = "/health/startup";    // Default
+healthConfig.includeDetails = false;             // Security: disable in prod
+
+// Custom readiness checks (optional)
+healthConfig.readinessChecks ~= (ref HealthCheckResult r) {
+    r.name = "database";
+    r.healthy = checkDatabaseConnection();
+    r.message = r.healthy ? "connected" : "connection failed";
+};
+
+// Create and use middleware
+auto health = createHealthMiddleware(app.server, healthConfig);
+app.use(health.middleware);
+
+// Call after initialization complete
+health.markStartupComplete();
+```
+
+**Probe Behavior**:
+
+| Probe | Path | Returns 200 When | Returns 503 When |
+|-------|------|------------------|------------------|
+| Liveness | `/health/live` | Process can respond | Never (if alive) |
+| Readiness | `/health/ready` | Started, not overloaded, custom checks pass | Shutting down, overloaded, checks fail |
+| Startup | `/health/startup` | `markStartupComplete()` called | Still initializing |
+
+**Response Format**:
+```json
+// Minimal (default)
+{"status":"ready"}
+
+// With details (includeDetails=true)
+{
+  "status":"ready",
+  "probe":"readiness",
+  "checks":[
+    {"name":"database","status":"pass","duration_us":1234}
+  ]
+}
+```
+
+**Kubernetes Configuration Example**:
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+
+startupProbe:
+  httpGet:
+    path: /health/startup
+    port: 8080
+  failureThreshold: 30
+  periodSeconds: 10
+```
+
+**Integration with Backpressure**: The readiness probe automatically returns 503 when `server.isInOverload()` is true, enabling Kubernetes to route traffic away from overloaded pods.
+
+---
+
+#### 5.4.6 Load Shedding Middleware (V0.6)
+
+**Status**: ✅ Implemented (2025-12-05)
+
+HTTP-level load shedding that complements TCP-level backpressure. Works on existing connections (keep-alive) and supports priority bypass.
+
+**Why Both Layers?**
+| Layer | When Triggers | What It Does |
+|-------|--------------|--------------|
+| TCP Backpressure | Too many connections | Rejects new connections |
+| Load Shedding | Too many requests | Rejects requests on existing connections |
+
+**Configuration**:
+```d
+auto config = LoadSheddingConfig();
+config.utilizationHighWater = 0.8;    // Start shedding at 80%
+config.utilizationLowWater = 0.6;     // Stop shedding at 60%
+config.inFlightHighWater = 800;       // In-flight request limit
+config.inFlightLowWater = 500;        // Resume threshold
+config.bypassPaths = ["/health/*", "/admin/*"];  // Never shed these
+config.enableProbabilistic = true;    // Gradual shedding
+
+app.use(loadSheddingMiddleware(app.server, config));
+```
+
+**Features**:
+- **Hysteresis**: Prevents oscillation between shedding/normal state
+- **Probabilistic**: Sheds proportionally to load (not hard cutoff)
+- **Bypass Paths**: Critical endpoints skip shedding (glob patterns: `/health/*`)
+- **Statistics**: Track shed/bypassed/allowed requests
+
+**Statistics API**:
+```d
+auto shedder = createLoadSheddingMiddleware(app.server, config);
+app.use(shedder.middleware);
+
+// Later
+auto stats = shedder.getStats();
+writefln("Shed: %d, Bypassed: %d, Allowed: %d", 
+    stats.requestsShed, stats.requestsBypassed, stats.requestsAllowed);
+```
+
+**Response Format**:
+```http
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json
+Retry-After: 5
+Cache-Control: no-cache, no-store
+
+{"error":"Service temporarily unavailable","reason":"load_shedding"}
+```
+
+**Best Practices**:
+- Use with backpressure for defense-in-depth
+- Always bypass health probe paths
+- Set thresholds 10-20% below backpressure thresholds
+- Monitor `sheddingStateTransitions` to tune thresholds
+
+---
+
+#### 5.4.7 Circuit Breaker Middleware (V0.6)
+
+**Status**: ✅ Implemented (2025-12-05)
+
+Prevents cascading failures by isolating failing dependencies. Uses a three-state machine to automatically detect failures and recover when the service is healthy again.
+
+**State Machine**:
+```
+┌─────────┐  failures >= threshold   ┌──────┐
+│ CLOSED  │ ──────────────────────── │ OPEN │
+│ (normal)│                          │(fail)│
+└────┬────┘                          └──┬───┘
+     │                                  │
+     │  success >= threshold            │ timeout elapsed
+     │                                  │
+     └──────────── ┌─────────┐ ◄───────┘
+                   │HALF_OPEN│
+                   │ (test)  │
+                   └─────────┘
+```
+
+**Configuration**:
+```d
+auto config = CircuitBreakerConfig();
+config.failureThreshold = 5;          // Open after 5 consecutive failures
+config.successThreshold = 3;          // Close after 3 successes in half-open
+config.resetTimeout = 30.seconds;     // Try half-open after 30s
+config.halfOpenMaxRequests = 3;       // Allow 3 test requests in half-open
+config.failureStatusCodes = [500, 502, 503, 504];  // What counts as failure
+config.bypassPaths = ["/health/*", "/metrics"];    // Never trip on these
+
+app.use(circuitBreakerMiddleware(config));
+```
+
+**Features**:
+- **Automatic Recovery**: Circuit transitions OPEN → HALF_OPEN after timeout
+- **Gradual Testing**: Limited requests in HALF_OPEN to test recovery
+- **Bypass Paths**: Critical endpoints skip circuit breaker (glob patterns)
+- **Status Code Detection**: Configurable failure detection (default: 5xx)
+- **Thread-Safe**: Atomic operations for high-concurrency scenarios
+
+**Statistics API**:
+```d
+auto cb = createCircuitBreakerMiddleware(config);
+app.use(cb.middleware);
+
+// Monitor circuit state
+auto stats = cb.getStats();
+if (stats.currentState == CircuitState.OPEN) {
+    log.warn("Circuit OPEN! Failures: ", stats.consecutiveFailures);
+}
+
+// Manual reset if needed (use with caution)
+cb.reset();
+```
+
+**Response Format** (when OPEN):
+```http
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json
+Retry-After: 25
+X-Circuit-State: open
+Cache-Control: no-cache, no-store
+
+{"error":"Service temporarily unavailable","reason":"circuit_open"}
+```
+
+**Best Practices**:
+- Set `failureThreshold` based on expected error rate (5-10 is typical)
+- Use shorter `resetTimeout` for fast-failing services
+- Always bypass health probe paths to allow monitoring
+- Monitor `timesOpened` and `timesClosed` for circuit stability
+- Consider separate circuit breakers per downstream service
+
+**Integration with Load Shedding**:
+```d
+// Recommended middleware order for resilience
+app.use(healthMiddleware(server, healthConfig));         // First: health probes
+app.use(loadSheddingMiddleware(server, shedConfig));     // Second: capacity protection
+app.use(circuitBreakerMiddleware(cbConfig));             // Third: failure isolation
+// ... other middleware and handlers
+```
+
+---
+
+#### 5.4.8 Distributed Tracing Middleware (V0.6)
+
+**Status**: ✅ Implemented (2025-12-05)
+
+OpenTelemetry-compatible distributed tracing with W3C Trace Context propagation. Enables end-to-end request tracing across microservices without external dependencies.
+
+**W3C Trace Context Format**:
+```
+traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+             ^^-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-^^^^^^^^^^^^^^^^-^^
+             │  │                                │                 └─ flags (01 = sampled)
+             │  │                                └─ parent-id (span-id, 16 hex)
+             │  └─ trace-id (32 hex)
+             └─ version (always 00)
+```
+
+**Core Components**:
+
+```d
+// TraceContext - W3C trace context parsing/generation
+auto ctx = TraceContext.parse("00-abc...123-def...456-01");
+auto newCtx = TraceContext.generate(sampled: true);
+auto child = TraceContext.child(parent);
+
+// Span - timing and metadata
+auto span = Span.create("http.request", SpanKind.SERVER);
+span.setAttribute("http.method", "GET");
+span.setAttribute("http.status_code", 200L);
+span.addEvent("request.parsed");
+span.setOk();
+span.end();
+
+// SpanExporter - pluggable backends
+interface SpanExporter {
+    void exportSpan(const ref Span span);
+    void flush();
+    void shutdown();
+}
+```
+
+**Middleware Configuration**:
+```d
+auto config = TracingConfig();
+config.serviceName = "my-api";
+config.samplingProbability = 0.1;  // Sample 10% of requests
+config.excludePaths = ["/health", "/metrics"];
+config.propagateContext = true;
+
+auto exporter = new ConsoleSpanExporter();  // For development
+auto tracing = new TracingMiddleware(config, exporter);
+
+app.use(tracing.middleware);
+```
+
+**Built-in Exporters**:
+- `ConsoleSpanExporter` — Pretty-prints spans to stdout (development)
+- `NoopSpanExporter` — Discards all spans (testing/disabled)
+- `BatchingSpanExporter` — Buffers spans for efficient export
+- `MultiSpanExporter` — Sends to multiple backends simultaneously
+
+**Accessing Trace Context in Handlers**:
+```d
+app.get("/api/users/:id", (ref Context ctx) {
+    // Get trace identifiers for logging
+    auto traceId = ctx.getTraceId();
+    auto spanId = ctx.getSpanId();
+    auto traceparent = ctx.getTraceparent();
+    
+    log.info("Processing request", "trace_id", traceId);
+    
+    // Forward to downstream services
+    auto response = httpClient.get(downstreamUrl, [
+        "traceparent": traceparent
+    ]);
+    
+    ctx.json(["user": userData]);
+});
+```
+
+**Automatic Span Attributes**:
+```d
+// These are automatically set by TracingMiddleware:
+// - http.method: GET, POST, etc.
+// - http.url: /api/users/123
+// - http.status_code: 200
+// - http.request_content_length
+// - http.response_content_length  
+// - client.address: 192.168.1.100
+// - server.address: api.example.com
+// - aurora.service: my-api (from config)
+```
+
+**Span Events** (automatic):
+```
+├─ request.received (t=0ms)
+├─ headers.parsed (t=0.1ms)  
+├─ handler.started (t=0.2ms)
+├─ handler.completed (t=15ms)
+└─ response.sent (t=15.5ms)
+```
+
+**Custom Child Spans**:
+```d
+app.get("/api/report", (ref Context ctx) {
+    auto parentCtx = ctx.getTracingData().context;
+    
+    // Create child span for database query
+    auto dbSpan = Span.fromContext(parentCtx, "db.query", SpanKind.CLIENT);
+    dbSpan.setAttribute("db.system", "postgresql");
+    dbSpan.setAttribute("db.statement", "SELECT * FROM reports...");
+    
+    auto results = database.query(...);
+    
+    if (results.error) {
+        dbSpan.setError(results.error.message);
+    } else {
+        dbSpan.setOk();
+    }
+    dbSpan.end();
+    
+    ctx.json(results.data);
+});
+```
+
+**Integration with Circuit Breaker**:
+```d
+// Trace IDs are preserved across circuit breaker state changes
+// When circuit opens, the span is marked with error status
+
+app.use(tracingMiddleware.middleware);      // First: start span
+app.use(circuitBreakerMiddleware(config));  // May reject request
+// Span will show: status=ERROR, error.type=circuit_open
+```
+
+**Console Output Example** (ConsoleSpanExporter):
+```
+[SPAN] http.request (SERVER) dur=23.45ms trace=abc123...
+  ├─ http.method: GET
+  ├─ http.url: /api/users/42
+  ├─ http.status_code: 200
+  ├─ client.address: 10.0.0.1
+  └─ status: OK
+  Events:
+    ├─ request.received @ 0.00ms
+    ├─ handler.started @ 0.12ms
+    └─ response.sent @ 23.45ms
+```
+
+**Best Practices**:
+- Use `samplingProbability` < 1.0 in production to reduce overhead
+- Exclude health/metrics paths to avoid noise
+- Forward `traceparent` header to all downstream HTTP calls
+- Add `trace_id` to all log messages for correlation
+- Use `BatchingSpanExporter` for production backends
+- Create child spans for significant operations (DB, external APIs)
+
+---
+
+#### 5.4.9 Bulkhead Middleware (V0.7)
+
+**Status**: ✅ Implemented (2025-12-05)
+
+Implements the Bulkhead pattern (from "Release It!" by Michael Nygard) to isolate failures between endpoint groups. Like ship bulkheads that prevent sinking, this middleware partitions concurrency pools so overload in one area doesn't cascade to others.
+
+**Use Case**: If `/api/reports` endpoints are slow (DB heavy), they shouldn't exhaust all server threads and cause `/api/health` or `/admin/*` to timeout.
+
+**Configuration**:
+```d
+struct BulkheadConfig {
+    uint maxConcurrent = 100;     // Max simultaneous requests
+    uint maxQueue = 50;           // Max waiting in queue (0 = fail-fast)
+    Duration timeout = 5.seconds; // Max queue wait time
+    string name = "default";      // Identifier for logging/metrics
+    uint retryAfterSeconds = 5;   // Retry-After header value
+}
+```
+
+**Basic Usage**:
+```d
+// Create isolated bulkheads for different endpoint groups
+auto apiBulkhead = createBulkheadMiddleware(100, 50, 5.seconds, "api");
+auto adminBulkhead = createBulkheadMiddleware(10, 5, 2.seconds, "admin");
+auto reportsBulkhead = createBulkheadMiddleware(20, 10, 30.seconds, "reports");
+
+// Apply to route groups
+app.group("/api", r => r.use(apiBulkhead.middleware));
+app.group("/admin", r => r.use(adminBulkhead.middleware));
+app.group("/reports", r => r.use(reportsBulkhead.middleware));
+```
+
+**Bulkhead States**:
+- `NORMAL` — Below 75% concurrent capacity
+- `FILLING` — Above 75% capacity or queue filling
+- `OVERLOADED` — At max concurrent AND queue ≥ 50% full
+
+**Statistics**:
+```d
+struct BulkheadStats {
+    uint activeCalls;       // Currently executing
+    uint queuedCalls;       // Currently waiting
+    ulong completedCalls;   // Total successful
+    ulong rejectedCalls;    // Rejected (bulkhead full)
+    ulong timedOutCalls;    // Timed out in queue
+    BulkheadState state;    // Current state
+    
+    double utilization();        // activeCalls / maxConcurrent
+    double queueUtilization();   // queuedCalls / maxQueue
+}
+
+// Monitor bulkhead health
+auto stats = apiBulkhead.getStats();
+if (stats.state == BulkheadState.OVERLOADED) {
+    metrics.increment("bulkhead.overloaded", ["name": stats.name]);
+}
+```
+
+**Rejection Response**:
+```http
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json
+Retry-After: 5
+X-Bulkhead-Name: api
+X-Bulkhead-Reason: full
+
+{"error":"Service temporarily at capacity","bulkhead":"api","reason":"full"}
+```
+
+**Fail-Fast Mode** (no queueing):
+```d
+// Set maxQueue = 0 for immediate rejection when at capacity
+auto criticalBulkhead = createBulkheadMiddleware(50, 0, 0.seconds, "critical");
+// Requests are either processed immediately or rejected
+```
+
+**Recommended Middleware Order**:
+```d
+app.use(healthMiddleware(server, healthConfig));         // First: health probes
+app.use(loadSheddingMiddleware(server, shedConfig));     // Second: global capacity
+app.use(bulkheadMiddleware(100, 50, 5.seconds, "api"));  // Third: per-group isolation
+app.use(circuitBreakerMiddleware(cbConfig));             // Fourth: failure isolation
+app.use(tracingMiddleware("my-service", exporter));      // Fifth: observability
+```
+
+**Sizing Guidelines**:
+- `maxConcurrent`: Based on downstream capacity (DB connections, external API rate limits)
+- `maxQueue`: 25-50% of maxConcurrent for burst absorption
+- `timeout`: Less than client timeout (typically 2-10 seconds)
+- Heavy endpoints (reports, exports): Lower maxConcurrent, higher timeout
+- Critical endpoints (health, admin): Low maxConcurrent, maxQueue=0 (fail-fast)
+
+**Thread Safety**:
+- Uses atomic operations for hot path (minimal lock contention)
+- Condition variable for queue waiting (no busy-wait)
+- Safe for concurrent access from multiple worker fibers
+
+---
+
+#### 5.4.10 Memory Management (V0.7)
+
+**Status**: ✅ Implemented (2025-12-05)
+
+Provides proactive memory management to prevent GC-induced latency spikes and OOM conditions in production. The D garbage collector can cause unpredictable pauses under memory pressure; this module helps manage memory proactively.
+
+**Memory States**:
+- `NORMAL` — Below 80% of configured limit, normal operation
+- `PRESSURE` — 80-95%, triggers GC.collect() and logs warnings
+- `CRITICAL` — Above 95%, rejects new requests to prevent OOM
+
+**Configuration**:
+```d
+struct MemoryConfig {
+    size_t maxHeapBytes = 512 * 1024 * 1024;  // 512 MB default
+    double highWaterRatio = 0.8;               // GC trigger at 80%
+    double criticalWaterRatio = 0.95;          // Reject at 95%
+    PressureAction pressureAction = GC_COLLECT;
+    Duration minGcInterval = 5.seconds;        // Prevent GC thrashing
+    string[] bypassPaths = ["/health/*"];      // Health probes bypass
+    uint retryAfterSeconds = 10;               // Retry-After header
+}
+```
+
+**Pressure Actions**:
+- `GC_COLLECT` — Trigger GC.collect() when reaching high water (default)
+- `LOG_ONLY` — Log warning but don't trigger GC
+- `CUSTOM` — Call custom callback only
+- `NONE` — Monitoring only, no automatic action
+
+**Basic Usage**:
+```d
+auto memConfig = MemoryConfig();
+memConfig.maxHeapBytes = 768 * 1024 * 1024;  // 768 MB limit
+memConfig.highWaterRatio = 0.75;              // GC at 75%
+
+auto monitor = new MemoryMonitor(memConfig);
+monitor.onPressure = (state) {
+    log.warn("Memory pressure: ", state);
+    metrics.increment("memory.pressure_events");
+};
+
+// Protect server from OOM
+app.use(memoryMiddleware(monitor));
+
+// Periodic monitoring (optional, for proactive checks)
+runTask(() {
+    while (true) {
+        monitor.check();
+        sleep(1.seconds);
+    }
+});
+```
+
+**Statistics & Metrics**:
+```d
+struct MemoryStats {
+    size_t usedBytes;         // Currently used GC heap
+    size_t freeBytes;         // Free bytes in GC pools
+    size_t poolBytes;         // Total GC heap size
+    size_t maxBytes;          // Configured maximum
+    MemoryState state;        // Current state
+    ulong gcCollections;      // GC.collect() calls triggered
+    ulong rejectedRequests;   // Requests rejected (critical)
+    Duration pressureTime;    // Total time in PRESSURE state
+    Duration criticalTime;    // Total time in CRITICAL state
+    
+    double utilization();      // usedBytes / maxBytes
+    double poolUtilization();  // usedBytes / poolBytes
+    long headroom();           // Bytes until high water
+}
+
+// Export to metrics
+auto stats = monitor.getStats();
+metrics.gauge("memory.used_bytes", stats.usedBytes);
+metrics.gauge("memory.utilization", stats.utilization);
+metrics.counter("memory.gc_collections", stats.gcCollections);
+metrics.counter("memory.rejected", stats.rejectedRequests);
+```
+
+**Rejection Response**:
+```http
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json
+Retry-After: 10
+X-Memory-State: critical
+Cache-Control: no-cache, no-store
+
+{"error":"Server under memory pressure","reason":"memory_critical"}
+```
+
+**Kubernetes Integration**:
+```yaml
+# Set Aurora limit below container limit to leave headroom for stack, 
+# non-GC allocations, and OS page cache
+# Container: 1Gi → Aurora: 768Mi (75%)
+resources:
+  limits:
+    memory: "1Gi"
+env:
+  - name: AURORA_MAX_HEAP
+    value: "805306368"  # 768 MB
+```
+
+**Factory Functions**:
+```d
+// Quick setup with heap limit only
+app.use(memoryMiddleware(512 * 1024 * 1024));
+
+// With full configuration
+app.use(memoryMiddleware(memConfig));
+
+// With existing monitor (for stats access)
+auto monitor = new MemoryMonitor(config);
+app.use(memoryMiddleware(monitor));
+
+// Check on every request (not recommended for high throughput)
+app.use(memoryMiddleware(monitor, true));  // checkOnRequest=true
+```
+
+**Recommended Middleware Order**:
+```d
+app.use(healthMiddleware(server, healthConfig));         // First: health probes
+app.use(memoryMiddleware(monitor));                      // Second: memory protection
+app.use(loadSheddingMiddleware(server, shedConfig));     // Third: global capacity
+app.use(bulkheadMiddleware(100, 50, 5.seconds, "api"));  // Fourth: per-group isolation
+app.use(circuitBreakerMiddleware(cbConfig));             // Fifth: failure isolation
+app.use(tracingMiddleware("my-service", exporter));      // Sixth: observability
+```
+
+**Sizing Guidelines**:
+- `maxHeapBytes`: 60-75% of container memory limit
+- `highWaterRatio`: 0.7-0.8 for proactive GC
+- `criticalWaterRatio`: 0.9-0.95 depending on burst tolerance
+- `minGcInterval`: 5-10 seconds to prevent GC thrashing
+- `bypassPaths`: Include all health/liveness probe paths
+
+**Thread Safety**:
+- Uses atomic operations for all state tracking
+- Safe for concurrent access from multiple worker fibers
+- GC.collect() is inherently thread-safe in D
+
 ---
 
 ### 5.X Connection Management Critical Bug Fixes
