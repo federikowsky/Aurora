@@ -4498,7 +4498,8 @@ Examples where manual SIMD might help:
 - ✅ Multi-threaded workers
 - ✅ NUMA optimization
 - ✅ Testing utilities
-- ✅ **Server Hooks & Exception Handlers (V0.4)** ← NEW
+- ✅ **Server Hooks & Exception Handlers (V0.4)**
+- ✅ **WebSocket Integration (V0.5)** ← NEW
 
 **V0.4 Features (IMPLEMENTED)**:
 - ✅ Server lifecycle hooks (onStart, onStop, onError, onRequest, onResponse)
@@ -4520,7 +4521,6 @@ Examples where manual SIMD might help:
 - ❌ Authentication & Authorization (JWT, OAuth2, RBAC)
 - ❌ Background Jobs & Task Queue
 - ❌ Advanced CLI Tool (code generation, scaffolding)
-- ❌ WebSocket (full implementation)
 - ❌ GraphQL
 - ❌ Event System & Event Sourcing
 - ❌ API Versioning
@@ -4534,7 +4534,6 @@ Examples where manual SIMD might help:
 - Authentication & Authorization (JWT, OAuth2, RBAC)
 - Background Jobs system
 - Advanced CLI tooling
-- WebSocket support
 - Testing utilities estese
 ˜
 #### Phase 2: Enterprise Features (v1.0)
@@ -4550,6 +4549,240 @@ Examples where manual SIMD might help:
 - gRPC support
 - Cloud provider SDKs
 - Plugin system
+
+---
+
+## 21. WEBSOCKET INTEGRATION
+
+### 21.1 Overview
+
+Aurora provides WebSocket support through the `aurora.web.websocket` module, wrapping the [Aurora-WebSocket](https://github.com/federikowsky/Aurora-WebSocket) library. The integration provides a clean, high-level API that hides connection hijacking, handshake validation, and protocol details.
+
+**Design Philosophy**:
+- **Simple API**: `upgradeWebSocket()` + `WebSocket` class
+- **Null on failure**: Returns `null` if upgrade fails, letting handler decide HTTP response
+- **Explicit resource management**: Use `scope(exit) ws.close()` for deterministic cleanup
+- **Destructor as safety net**: Will close if forgotten, but don't rely on GC timing
+
+### 21.2 Quick Start
+
+```d
+import aurora;
+import aurora.web.websocket;
+
+void main() {
+    auto app = Aurora();
+
+    app.get("/ws", (ref ctx) {
+        auto ws = upgradeWebSocket(ctx);
+        if (ws is null) {
+            ctx.status(400).send("WebSocket upgrade failed");
+            return;
+        }
+        scope(exit) ws.close();
+
+        // Echo loop
+        while (ws.connected) {
+            auto msg = ws.receive();
+            if (msg.isNull) break;
+            ws.send(msg.get.text);
+        }
+    });
+
+    app.listen(3000);
+}
+```
+
+### 21.3 API Reference
+
+#### `upgradeWebSocket(ctx, config = WebSocketConfig.init)`
+
+Upgrades HTTP connection to WebSocket. Main entry point.
+
+**Steps performed**:
+1. Validates upgrade request (RFC 6455)
+2. Validates origin (if configured)
+3. Negotiates subprotocol (if configured)
+4. Hijacks connection from Aurora
+5. Sends HTTP 101 Switching Protocols response
+6. Returns ready-to-use `WebSocket` object
+
+**Returns**: `WebSocket` or `null` on failure.
+
+#### `WebSocket` Class
+
+| Method | Description |
+|--------|-------------|
+| `receive()` | Receive next message. Returns `Nullable!Message` (null on close) |
+| `send(string)` | Send text message |
+| `sendBinary(ubyte[])` | Send binary message |
+| `ping(ubyte[] = null)` | Send ping frame (keepalive) |
+| `close(code, reason)` | Close connection gracefully |
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `connected` | `bool` | `true` if connection is open |
+| `protocol` | `string` | Negotiated subprotocol (or `null`) |
+
+#### `WebSocketConfig` Struct
+
+```d
+struct WebSocketConfig {
+    string[] subprotocols;                              // Supported subprotocols
+    bool delegate(string origin) @safe validateOrigin;  // Origin validation
+    size_t maxFrameSize = 64 * 1024;                   // Max frame (64KB)
+    size_t maxMessageSize = 16 * 1024 * 1024;          // Max message (16MB)
+    size_t bufferSize = 16 * 1024;                     // Read buffer (16KB)
+    bool autoReplyPing = true;                         // Auto-respond to pings
+}
+```
+
+#### Re-exported Types
+
+From Aurora-WebSocket:
+- `MessageType` - Enum: `Text`, `Binary`, `Ping`, `Pong`, `Close`
+- `CloseCode` - Enum: `Normal`, `GoingAway`, `ProtocolError`, etc.
+- `Message` - Message struct with `type`, `text`, `data` fields
+- `WebSocketException`, `WebSocketClosedException`
+
+### 21.4 Examples
+
+#### Subprotocol Negotiation
+
+```d
+WebSocketConfig config;
+config.subprotocols = ["chat.v2", "chat.v1"];  // Prefer v2
+config.validateOrigin = (origin) => origin == "https://mychat.com";
+
+auto ws = upgradeWebSocket(ctx, config);
+if (ws is null) return ctx.status(400).send("Upgrade failed");
+scope(exit) ws.close();
+
+if (ws.protocol == "chat.v2") {
+    handleChatV2(ws);
+} else {
+    handleChatV1(ws);
+}
+```
+
+#### JSON Messages
+
+```d
+import std.json;
+
+auto ws = upgradeWebSocket(ctx);
+if (ws is null) return ctx.status(400).send("Upgrade failed");
+scope(exit) ws.close();
+
+while (ws.connected) {
+    auto msg = ws.receive();
+    if (msg.isNull) break;
+
+    try {
+        auto json = parseJSON(msg.get.text);
+        if (json["type"].str == "ping") {
+            ws.send(`{"type":"pong"}`);
+        }
+    } catch (Exception e) {
+        ws.send(`{"type":"error","message":"Invalid JSON"}`);
+    }
+}
+```
+
+#### Binary Data
+
+```d
+auto ws = upgradeWebSocket(ctx);
+if (ws is null) return ctx.status(400).send("Upgrade failed");
+scope(exit) ws.close();
+
+ubyte[] fileData;
+while (ws.connected) {
+    auto msg = ws.receive();
+    if (msg.isNull) break;
+
+    if (msg.get.type == MessageType.Binary) {
+        fileData ~= msg.get.data;
+    } else if (msg.get.type == MessageType.Text && msg.get.text == "done") {
+        processFile(fileData);
+        ws.send("File received: " ~ fileData.length.to!string ~ " bytes");
+        break;
+    }
+}
+```
+
+### 21.5 Error Handling
+
+`upgradeWebSocket()` returns `null` for:
+- Not a WebSocket upgrade request
+- Invalid handshake (missing headers, bad key)
+- Origin rejected by validation callback
+- Connection hijack failed
+
+`receive()` returns `Nullable!Message.init` when:
+- Connection closed normally
+- Connection closed due to error
+- Network error occurred
+
+Send methods are no-ops if connection is closed.
+
+### 21.6 Close Codes
+
+| Code | Name | Description |
+|------|------|-------------|
+| 1000 | `Normal` | Normal closure |
+| 1001 | `GoingAway` | Endpoint going away |
+| 1002 | `ProtocolError` | Protocol error |
+| 1003 | `UnsupportedData` | Unsupported data type |
+| 1007 | `InvalidData` | Invalid data (non-UTF8) |
+| 1008 | `PolicyViolation` | Policy violation |
+| 1009 | `MessageTooBig` | Message too big |
+| 1011 | `InternalError` | Server error |
+
+### 21.7 Thread Safety
+
+`WebSocket` is **NOT thread-safe**. Each connection should be used from a single thread/fiber.
+
+### 21.8 Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    User Code                                │
+│  upgradeWebSocket(ctx) → WebSocket                          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              aurora.web.websocket                           │
+│  ┌─────────────────┐  ┌──────────────────────────────────┐  │
+│  │ WebSocketConfig │  │ WebSocket                        │  │
+│  │ - subprotocols  │  │ - receive() → Nullable!Message   │  │
+│  │ - validateOrigin│  │ - send(text) / sendBinary(data)  │  │
+│  │ - maxFrameSize  │  │ - ping() / close(code, reason)   │  │
+│  │ - bufferSize    │  │ - connected / protocol           │  │
+│  └─────────────────┘  └──────────────────────────────────┘  │
+│                              │                              │
+│  ┌───────────────────────────┴───────────────────────────┐  │
+│  │ WebSocketAdapter (package-private)                    │  │
+│  │ implements IWebSocketStream                           │  │
+│  │ - bridges HijackedConnection → Aurora-WebSocket       │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Aurora-WebSocket                               │
+│  WebSocketConnection, validateUpgradeRequest,               │
+│  buildUpgradeResponse, Message, CloseCode, etc.             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Aurora Core                                    │
+│  Context.hijack() → HijackedConnection                      │
+│  Raw TCP socket access                                      │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
