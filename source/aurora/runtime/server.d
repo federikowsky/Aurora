@@ -953,6 +953,7 @@ final class Server
             
             // Handle request
             ubyte[] responseData;
+            bool wasHijacked = false;
             
             if (handler !is null)
             {
@@ -970,12 +971,18 @@ final class Server
             }
             else if (router !is null)
             {
-                responseData = handleWithRouter(&request);
+                auto result = handleWithRouter(&request, conn);
+                responseData = result.data;
+                wasHijacked = result.hijacked;
             }
             else
             {
                 responseData = cast(ubyte[])"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
             }
+            
+            // If hijacked, external handler owns the connection
+            if (wasHijacked)
+                return;
             
             // Send response
             if (responseData.length > 0)
@@ -1003,10 +1010,18 @@ final class Server
         }
     }
     
-    private ubyte[] handleWithRouter(HTTPRequest* request) @trusted
+    /// Result from handleWithRouter - includes hijack state
+    private struct RouterResult
+    {
+        ubyte[] data;
+        bool hijacked;
+    }
+    
+    private RouterResult handleWithRouter(HTTPRequest* request, TCPConnection conn) @trusted
     {
         Context ctx;
         ctx.request = request;
+        ctx.setRawConnection(conn);  // Pass connection for hijack support
         
         auto response = HTTPResponse(200, "OK");
         ctx.response = &response;
@@ -1039,25 +1054,47 @@ final class Server
                 response.setBody(`{"error":"Not Found"}`);
             }
             
+            // Check if connection was hijacked
+            if (ctx.isHijacked())
+            {
+                // Connection is now owned by external handler
+                // Do NOT send response, do NOT close connection
+                return RouterResult(null, true);
+            }
+            
             // Execute onResponse hooks
             _hooks.executeOnResponse(ctx);
             
-            return buildResponse(response.status, response.getContentType(), response.getBody());
+            auto respData = buildResponse(response.status, 
+                response.getContentType(), response.getBody());
+            return RouterResult(respData, false);
         }
         catch (Exception e)
         {
+            // Check if hijacked before trying to send error response
+            if (ctx.isHijacked())
+            {
+                // Cannot send error response on hijacked connection
+                // Just log and return
+                try { logError("Exception after hijack: " ~ e.msg); } catch (Exception) {}
+                return RouterResult(null, true);
+            }
+            
             // Try to handle with registered exception handlers
             try
             {
                 handleException(ctx, e);
                 // Handler executed - return the response it set
                 _hooks.executeOnResponse(ctx);
-                return buildResponse(response.status, response.getContentType(), response.getBody());
+                auto respData = buildResponse(response.status, 
+                    response.getContentType(), response.getBody());
+                return RouterResult(respData, false);
             }
             catch (Exception)
             {
                 // No handler found or handler failed - return 500
-                return buildResponse(500, "application/json", `{"error":"Internal Server Error"}`);
+                return RouterResult(buildResponse(500, "application/json", 
+                    `{"error":"Internal Server Error"}`), false);
             }
         }
     }

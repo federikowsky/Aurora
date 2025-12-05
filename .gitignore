@@ -59,4 +59,5 @@ Thumbs.db
 # !docs/specs.md# Ignore compiled examples
 tests/realworld/multicore_server
 tests/realworld/singlecore_server
+tests/autobahn/reports
 build/
