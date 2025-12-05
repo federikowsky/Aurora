@@ -33,6 +33,20 @@
         "-Llib/wire/build",
         "-Llib/fastjsond/build"
     ],
+    "buildTypes": {
+        "release": {
+            "dflags-ldc2": ["-O2", "-release", "-enable-inlining"],
+            "dflags-dmd": ["-O", "-release", "-inline"]
+        },
+        "release-fast": {
+            "dflags-ldc2": ["-O3", "-release", "-enable-inlining", "-mcpu=native", "-flto=full"],
+            "dflags-dmd": ["-O", "-release", "-inline", "-boundscheck=off"]
+        },
+        "release-safe": {
+            "dflags-ldc2": ["-O2", "-release", "-enable-inlining"],
+            "dflags-dmd": ["-O", "-release", "-inline"]
+        }
+    },
     "configurations": [
         {
             "name": "library",
@@ -136,37 +150,5 @@
             "sourcePaths": ["source"],
             "importPaths": ["source", "lib/wire/source", "lib/fastjsond/source"]
         }
-    ],
-    "buildTypes": {
-        "debug": {
-            "buildOptions": [
-                "debugMode",
-                "debugInfo"
-            ]
-        },
-        "release": {
-            "buildOptions": [
-                "releaseMode",
-                "optimize",
-                "inline"
-            ],
-            "dflags-ldc": [
-                "-O3",
-                "-release"
-            ]
-        },
-        "release-nobounds": {
-            "buildOptions": [
-                "releaseMode",
-                "optimize",
-                "inline",
-                "noBoundsCheck"
-            ],
-            "dflags-ldc": [
-                "-O3",
-                "-release",
-                "-boundscheck=off"
-            ]
-        }
-    }
+    ]
 }

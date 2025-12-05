@@ -14,11 +14,6 @@ __test__*
 
 # Root executable
 /aurora
-/fiber_test
-/libaurora.a
-/unified_test
-/mt_test
-/test_server
 
 # Compiled example binaries (keep .d and .py files)
 examples/app_server
@@ -37,7 +32,6 @@ examples/test_server
 *.lst
 *.gcda
 *.gcno
-coverage/
 
 # IDE
 .vscode/
@@ -59,5 +53,4 @@ Thumbs.db
 # !docs/specs.md# Ignore compiled examples
 tests/realworld/multicore_server
 tests/realworld/singlecore_server
-tests/autobahn/reports
 build/

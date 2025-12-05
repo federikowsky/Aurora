@@ -45,7 +45,7 @@ EXAMPLE_TARGETS := $(patsubst $(EXAMPLES_DIR)/%.d,$(BUILD_DIR)/%,$(EXAMPLE_SOURC
 # Phony Targets
 # ============================================================================
 
-.PHONY: all clean lib test help info check-wire examples
+.PHONY: all clean lib test help info check-wire examples release release-fast
 
 # Default Target
 all: lib
@@ -55,6 +55,8 @@ help:
 	@echo "=========================================================="
 	@echo "  make all           - Build library (default)"
 	@echo "  make lib           - Build static library"
+	@echo "  make release       - Build in release mode (-O2)"
+	@echo "  make release-fast  - Build in release-fast mode (-O3, LTO)"
 	@echo "  make test          - Run tests via DUB"
 	@echo "  make test-cov      - Run tests with coverage (output in coverage/)"
 	@echo "  make clean-cov     - Clean coverage files"
@@ -96,6 +98,18 @@ $(LIB_OUT): $(D_SOURCES) | $(BUILD_DIR)
 	@$(DC) $(DFLAGS_LIB) $(D_SOURCES) -of=$@ -od=$(BUILD_DIR)
 	@echo "✓ Library built: $@"
 	@echo "  Size: $$(du -h $@ | cut -f1)"
+
+# Build library in release mode (via DUB)
+release: check-wire check-fastjsond
+	@echo "Building in release mode..."
+	@dub build --build=release
+	@echo "✓ Release build complete"
+
+# Build library in release-fast mode (via DUB, max optimizations)
+release-fast: check-wire check-fastjsond
+	@echo "Building in release-fast mode (max optimizations)..."
+	@dub build --build=release-fast
+	@echo "✓ Release-fast build complete"
 
 # Run tests via DUB (unit-threaded needs DUB for dependency resolution)
 test: check-wire check-fastjsond
