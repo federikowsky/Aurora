@@ -677,3 +677,174 @@ unittest
     assert(totalRequests == 100, "All requests should be processed");
     assert(allowedCount == 50, "Exactly 50 should be allowed with thread safety");
 }
+
+// ========================================
+// BUCKET CLEANUP TESTS
+// ========================================
+
+/// Test 26: Bucket cleanup removes stale entries
+@("Test 26: Bucket cleanup removes stale entries")
+unittest
+{
+    RateLimitConfig config;
+    config.requestsPerWindow = 10;
+    config.burstSize = 0;
+    config.windowSize = 1.seconds;
+    config.bucketExpiry = 1.msecs;  // Very short expiry for testing
+    config.cleanupInterval = Duration.zero;  // Disable auto cleanup
+    
+    auto limiter = new RateLimiter(config);
+    
+    // Create some buckets
+    limiter.isAllowed("client1");
+    limiter.isAllowed("client2");
+    limiter.isAllowed("client3");
+    
+    auto statsBefore = limiter.getStats();
+    assert(statsBefore.activeBuckets == 3, "Should have 3 active buckets");
+    
+    // Wait for expiry
+    Thread.sleep(5.msecs);
+    
+    // Manual cleanup
+    auto cleaned = limiter.cleanup();
+    
+    auto statsAfter = limiter.getStats();
+    assert(statsAfter.activeBuckets == 0, "All buckets should be cleaned");
+    assert(cleaned == 3, "Should have cleaned 3 buckets");
+    assert(statsAfter.totalCleaned == 3, "Total cleaned should be 3");
+}
+
+/// Test 27: Active buckets are not cleaned
+@("Test 27: Active buckets are not cleaned")
+unittest
+{
+    RateLimitConfig config;
+    config.requestsPerWindow = 10;
+    config.burstSize = 0;
+    config.windowSize = 1.seconds;
+    config.bucketExpiry = 50.msecs;  // Longer expiry for reliable testing
+    config.cleanupInterval = Duration.zero;
+    
+    auto limiter = new RateLimiter(config);
+    
+    // Create active bucket
+    limiter.isAllowed("active_client");
+    
+    // Create stale bucket that won't be refreshed
+    limiter.isAllowed("stale_client");
+    
+    auto statsBefore = limiter.getStats();
+    assert(statsBefore.activeBuckets == 2);
+    
+    // Wait some time and keep active client alive
+    Thread.sleep(20.msecs);
+    limiter.isAllowed("active_client");  // Refresh access time
+    
+    // Wait for stale_client to expire but active_client should still be valid
+    Thread.sleep(40.msecs);
+    limiter.isAllowed("active_client");  // Refresh again
+    
+    // Now stale_client (last access ~60ms ago) should be expired
+    // but active_client (last access ~0ms ago) should be valid
+    auto cleaned = limiter.cleanup();
+    
+    auto statsAfter = limiter.getStats();
+    assert(statsAfter.activeBuckets == 1, "Only active bucket should remain, got " ~ statsAfter.activeBuckets.to!string);
+    assert(cleaned == 1, "Should have cleaned 1 stale bucket");
+}
+
+/// Test 28: Max buckets limit prevents memory exhaustion
+@("Test 28: Max buckets limit")
+unittest
+{
+    RateLimitConfig config;
+    config.requestsPerWindow = 10;
+    config.burstSize = 0;
+    config.windowSize = 1.seconds;
+    config.maxBuckets = 5;
+    config.bucketExpiry = 1.msecs;  // Quick expiry
+    config.cleanupInterval = Duration.zero;
+    
+    auto limiter = new RateLimiter(config);
+    
+    // Fill up to max
+    for (int i = 0; i < 5; i++)
+    {
+        assert(limiter.isAllowed("client" ~ i.to!string), "Should allow up to maxBuckets");
+    }
+    
+    auto stats = limiter.getStats();
+    assert(stats.activeBuckets == 5, "Should have 5 buckets");
+    
+    // Wait for expiry then try to add more (should trigger cleanup)
+    Thread.sleep(5.msecs);
+    
+    // This should succeed because cleanup removes old buckets
+    assert(limiter.isAllowed("new_client"), "Should allow after cleanup makes room");
+}
+
+/// Test 29: Automatic periodic cleanup
+@("Test 29: Automatic periodic cleanup")
+unittest
+{
+    RateLimitConfig config;
+    config.requestsPerWindow = 10;
+    config.burstSize = 0;
+    config.windowSize = 1.seconds;
+    config.bucketExpiry = 1.msecs;
+    config.cleanupInterval = 5.msecs;  // Short interval for testing
+    
+    auto limiter = new RateLimiter(config);
+    
+    // Create buckets
+    limiter.isAllowed("auto1");
+    limiter.isAllowed("auto2");
+    
+    auto statsBefore = limiter.getStats();
+    assert(statsBefore.activeBuckets == 2);
+    
+    // Wait for expiry + cleanup interval
+    Thread.sleep(10.msecs);
+    
+    // Trigger automatic cleanup via isAllowed
+    limiter.isAllowed("trigger");
+    
+    auto statsAfter = limiter.getStats();
+    // New bucket created, old ones should be cleaned
+    assert(statsAfter.activeBuckets == 1, "Old buckets should be cleaned automatically");
+}
+
+/// Test 30: RateLimiterStats accuracy
+@("Test 30: RateLimiterStats accuracy")
+unittest
+{
+    RateLimitConfig config;
+    config.requestsPerWindow = 5;
+    config.maxBuckets = 100;
+    config.bucketExpiry = 1.msecs;
+    config.cleanupInterval = Duration.zero;
+    
+    auto limiter = new RateLimiter(config);
+    
+    // Initial stats
+    auto stats1 = limiter.getStats();
+    assert(stats1.activeBuckets == 0);
+    assert(stats1.totalCleaned == 0);
+    assert(stats1.maxBuckets == 100);
+    
+    // Add buckets
+    for (int i = 0; i < 10; i++)
+        limiter.isAllowed("stats_client_" ~ i.to!string);
+    
+    auto stats2 = limiter.getStats();
+    assert(stats2.activeBuckets == 10);
+    
+    // Cleanup
+    Thread.sleep(5.msecs);
+    limiter.cleanup();
+    
+    auto stats3 = limiter.getStats();
+    assert(stats3.activeBuckets == 0);
+    assert(stats3.totalCleaned == 10);
+}

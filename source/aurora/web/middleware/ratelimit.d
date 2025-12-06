@@ -40,6 +40,15 @@ struct RateLimitConfig
     
     /// Include Retry-After header
     bool includeRetryAfter = true;
+    
+    /// Cleanup interval for stale buckets (0 = disabled)
+    Duration cleanupInterval = 60.seconds;
+    
+    /// Bucket expiry time (buckets not accessed for this duration are removed)
+    Duration bucketExpiry = 5.minutes;
+    
+    /// Maximum number of buckets (0 = unlimited, prevents memory exhaustion)
+    size_t maxBuckets = 100_000;
 }
 
 /**
@@ -49,6 +58,7 @@ private struct TokenBucket
 {
     double tokens;
     long lastRefillTime;  // MonoTime in hnsecs
+    long lastAccessTime;  // MonoTime in hnsecs - for cleanup
     uint maxTokens;
     double refillRate;  // tokens per hnsec
     
@@ -57,6 +67,7 @@ private struct TokenBucket
         this.maxTokens = maxTokens;
         this.tokens = maxTokens;
         this.lastRefillTime = currentTimeHnsecs();
+        this.lastAccessTime = currentTimeHnsecs();
         // Calculate refill rate: maxTokens tokens per refillPeriod
         this.refillRate = cast(double)maxTokens / refillPeriod.total!"hnsecs";
     }
@@ -68,6 +79,7 @@ private struct TokenBucket
         if (tokens >= 1.0)
         {
             tokens -= 1.0;
+            lastAccessTime = currentTimeHnsecs();
             return true;
         }
         return false;
@@ -116,11 +128,15 @@ class RateLimiter
     private RateLimitConfig config;
     private TokenBucket[string] buckets;
     private Mutex mutex;
+    private long lastCleanupTime;
+    private size_t totalCleaned;  // Statistics
     
     this(RateLimitConfig config) @trusted
     {
         this.config = config;
         this.mutex = new Mutex();
+        this.lastCleanupTime = currentTimeHnsecs();
+        this.totalCleaned = 0;
     }
     
     /**
@@ -132,8 +148,22 @@ class RateLimiter
         try {
             synchronized (mutex)
             {
+                // Periodic cleanup check
+                maybeCleanup();
+                
                 if (key !in buckets)
                 {
+                    // Check max buckets limit
+                    if (config.maxBuckets > 0 && buckets.length >= config.maxBuckets)
+                    {
+                        // Force cleanup when at limit
+                        doCleanup();
+                        
+                        // If still at limit, reject (prevents DoS via bucket exhaustion)
+                        if (buckets.length >= config.maxBuckets)
+                            return false;
+                    }
+                    
                     TokenBucket bucket;
                     bucket.initialize(
                         config.requestsPerWindow + config.burstSize,
@@ -142,6 +172,8 @@ class RateLimiter
                     buckets[key] = bucket;
                 }
                 
+                // Update access time even on rate limit check
+                buckets[key].lastAccessTime = currentTimeHnsecs();
                 return buckets[key].tryConsume();
             }
         } catch (Exception) {
@@ -169,13 +201,99 @@ class RateLimiter
     }
     
     /**
-     * Clean up old buckets (call periodically)
+     * Clean up old buckets (call periodically or explicitly)
+     * Returns: number of buckets removed
      */
-    void cleanup() @trusted
+    size_t cleanup() @trusted
     {
-        // TODO: Implement bucket cleanup for keys not seen in a while
-        // This prevents memory growth with many unique keys
+        synchronized (mutex)
+        {
+            return doCleanup();
+        }
     }
+    
+    /**
+     * Get current statistics
+     */
+    RateLimiterStats getStats() @trusted nothrow
+    {
+        try {
+            synchronized (mutex)
+            {
+                RateLimiterStats stats;
+                stats.activeBuckets = buckets.length;
+                stats.totalCleaned = totalCleaned;
+                stats.maxBuckets = config.maxBuckets;
+                return stats;
+            }
+        } catch (Exception) {
+            return RateLimiterStats.init;
+        }
+    }
+    
+    private void maybeCleanup() @safe nothrow
+    {
+        if (config.cleanupInterval == Duration.zero)
+            return;
+            
+        auto now = currentTimeHnsecs();
+        auto elapsed = now - lastCleanupTime;
+        
+        if (elapsed >= config.cleanupInterval.total!"hnsecs")
+        {
+            try {
+                doCleanup();
+            } catch (Exception) {
+                // Ignore cleanup errors
+            }
+        }
+    }
+    
+    private size_t doCleanup() @safe
+    {
+        auto now = currentTimeHnsecs();
+        auto expiryHnsecs = config.bucketExpiry.total!"hnsecs";
+        
+        string[] keysToRemove;
+        
+        foreach (key, ref bucket; buckets)
+        {
+            if (now - bucket.lastAccessTime > expiryHnsecs)
+            {
+                keysToRemove ~= key;
+            }
+        }
+        
+        foreach (key; keysToRemove)
+        {
+            buckets.remove(key);
+        }
+        
+        totalCleaned += keysToRemove.length;
+        lastCleanupTime = now;
+        
+        return keysToRemove.length;
+    }
+    
+    private static long currentTimeHnsecs() @safe nothrow
+    {
+        import core.time : MonoTime;
+        try {
+            return MonoTime.currTime.ticks;
+        } catch (Exception) {
+            return 0;
+        }
+    }
+}
+
+/**
+ * Rate limiter statistics
+ */
+struct RateLimiterStats
+{
+    size_t activeBuckets;
+    size_t totalCleaned;
+    size_t maxBuckets;
 }
 
 /**
