@@ -11,6 +11,11 @@
  * - Content-Security-Policy (CSP)
  * - Referrer-Policy
  * - Permissions-Policy
+ * - X-Download-Options
+ * - X-Permitted-Cross-Domain-Policies
+ * - Cross-Origin-Opener-Policy (COOP)
+ * - Cross-Origin-Embedder-Policy (COEP)
+ * - Cross-Origin-Resource-Policy (CORP)
  */
 module aurora.web.middleware.security;
 
@@ -54,6 +59,24 @@ struct SecurityConfig
     
     // X-Permitted-Cross-Domain-Policies
     bool enableCrossDomainPolicies = true;
+    
+    // Cross-Origin-Opener-Policy (COOP)
+    // Controls how the document can share its browsing context group
+    // Options: "unsafe-none", "same-origin-allow-popups", "same-origin"
+    bool enableCOOP = false;  // Disabled by default (can break popups)
+    string coopPolicy = "same-origin";
+    
+    // Cross-Origin-Embedder-Policy (COEP)
+    // Prevents document from loading cross-origin resources without explicit permission
+    // Options: "unsafe-none", "require-corp", "credentialless"
+    bool enableCOEP = false;  // Disabled by default (can break resources)
+    string coepPolicy = "require-corp";
+    
+    // Cross-Origin-Resource-Policy (CORP)
+    // Controls which origins can embed the resource
+    // Options: "same-site", "same-origin", "cross-origin"
+    bool enableCORP = false;  // Disabled by default
+    string corpPolicy = "same-origin";
 }
 
 /**
@@ -150,6 +173,24 @@ class SecurityMiddleware
         if (config.enableCrossDomainPolicies)
         {
             setHeaderIfNotExists(ctx.response, "X-Permitted-Cross-Domain-Policies", "none");
+        }
+        
+        // Cross-Origin-Opener-Policy (COOP)
+        if (config.enableCOOP)
+        {
+            setHeaderIfNotExists(ctx.response, "Cross-Origin-Opener-Policy", config.coopPolicy);
+        }
+        
+        // Cross-Origin-Embedder-Policy (COEP)
+        if (config.enableCOEP)
+        {
+            setHeaderIfNotExists(ctx.response, "Cross-Origin-Embedder-Policy", config.coepPolicy);
+        }
+        
+        // Cross-Origin-Resource-Policy (CORP)
+        if (config.enableCORP)
+        {
+            setHeaderIfNotExists(ctx.response, "Cross-Origin-Resource-Policy", config.corpPolicy);
         }
     }
     

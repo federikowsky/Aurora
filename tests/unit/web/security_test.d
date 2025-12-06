@@ -11,6 +11,11 @@
  * - Content-Security-Policy (CSP)
  * - Referrer-Policy
  * - Permissions-Policy
+ * - X-Download-Options
+ * - X-Permitted-Cross-Domain-Policies
+ * - Cross-Origin-Opener-Policy (COOP)
+ * - Cross-Origin-Embedder-Policy (COEP)
+ * - Cross-Origin-Resource-Policy (CORP)
  */
 module tests.unit.web.security_test;
 
@@ -466,4 +471,210 @@ unittest
     security.handle(ctx, &next);
     
     getHeader(&response, "X-Permitted-Cross-Domain-Policies").shouldEqual("none");
+}
+
+// ============================================================================
+// CROSS-ORIGIN HEADERS TESTS (COOP, COEP, CORP)
+// ============================================================================
+
+// Test 22: Cross-Origin-Opener-Policy disabled by default
+@("COOP disabled by default")
+unittest
+{
+    auto config = SecurityConfig();
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    // COOP should NOT be set by default (can break popups)
+    hasHeader(&response, "Cross-Origin-Opener-Policy").shouldBeFalse;
+}
+
+// Test 23: Cross-Origin-Opener-Policy when enabled
+@("COOP header when enabled")
+unittest
+{
+    auto config = SecurityConfig();
+    config.enableCOOP = true;
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    getHeader(&response, "Cross-Origin-Opener-Policy").shouldEqual("same-origin");
+}
+
+// Test 24: Cross-Origin-Opener-Policy custom value
+@("COOP header custom value")
+unittest
+{
+    auto config = SecurityConfig();
+    config.enableCOOP = true;
+    config.coopPolicy = "same-origin-allow-popups";
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    getHeader(&response, "Cross-Origin-Opener-Policy").shouldEqual("same-origin-allow-popups");
+}
+
+// Test 25: Cross-Origin-Embedder-Policy disabled by default
+@("COEP disabled by default")
+unittest
+{
+    auto config = SecurityConfig();
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    // COEP should NOT be set by default (can break third-party resources)
+    hasHeader(&response, "Cross-Origin-Embedder-Policy").shouldBeFalse;
+}
+
+// Test 26: Cross-Origin-Embedder-Policy when enabled
+@("COEP header when enabled")
+unittest
+{
+    auto config = SecurityConfig();
+    config.enableCOEP = true;
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    getHeader(&response, "Cross-Origin-Embedder-Policy").shouldEqual("require-corp");
+}
+
+// Test 27: Cross-Origin-Embedder-Policy credentialless
+@("COEP credentialless option")
+unittest
+{
+    auto config = SecurityConfig();
+    config.enableCOEP = true;
+    config.coepPolicy = "credentialless";
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    getHeader(&response, "Cross-Origin-Embedder-Policy").shouldEqual("credentialless");
+}
+
+// Test 28: Cross-Origin-Resource-Policy disabled by default
+@("CORP disabled by default")
+unittest
+{
+    auto config = SecurityConfig();
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    // CORP should NOT be set by default
+    hasHeader(&response, "Cross-Origin-Resource-Policy").shouldBeFalse;
+}
+
+// Test 29: Cross-Origin-Resource-Policy when enabled
+@("CORP header when enabled")
+unittest
+{
+    auto config = SecurityConfig();
+    config.enableCORP = true;
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    getHeader(&response, "Cross-Origin-Resource-Policy").shouldEqual("same-origin");
+}
+
+// Test 30: Cross-Origin-Resource-Policy cross-origin for public APIs
+@("CORP cross-origin for APIs")
+unittest
+{
+    auto config = SecurityConfig();
+    config.enableCORP = true;
+    config.corpPolicy = "cross-origin";
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    getHeader(&response, "Cross-Origin-Resource-Policy").shouldEqual("cross-origin");
+}
+
+// Test 31: All Cross-Origin headers together (cross-origin isolation)
+@("full cross-origin isolation configuration")
+unittest
+{
+    // Full cross-origin isolation requires COOP + COEP
+    auto config = SecurityConfig();
+    config.enableCOOP = true;
+    config.coopPolicy = "same-origin";
+    config.enableCOEP = true;
+    config.coepPolicy = "require-corp";
+    config.enableCORP = true;
+    config.corpPolicy = "same-origin";
+    auto security = new SecurityMiddleware(config);
+    
+    Context ctx;
+    HTTPResponse response = HTTPResponse(200, "OK");
+    ctx.response = &response;
+    
+    void next() { }
+    
+    security.handle(ctx, &next);
+    
+    // All cross-origin headers should be set
+    getHeader(&response, "Cross-Origin-Opener-Policy").shouldEqual("same-origin");
+    getHeader(&response, "Cross-Origin-Embedder-Policy").shouldEqual("require-corp");
+    getHeader(&response, "Cross-Origin-Resource-Policy").shouldEqual("same-origin");
 }

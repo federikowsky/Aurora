@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.0] - 2025-12-06 "Security Hardening"
+
+Security header enhancements and production-ready authentication examples.
+
+### Added
+
+#### Security Headers Enhancement (`aurora.web.middleware.security`)
+- **Cross-Origin-Opener-Policy (COOP)** - Controls browsing context isolation
+  - `enableCOOP` - Enable/disable (disabled by default, can break popups)
+  - `coopPolicy` - "unsafe-none", "same-origin-allow-popups", "same-origin"
+- **Cross-Origin-Embedder-Policy (COEP)** - Prevents loading cross-origin resources
+  - `enableCOEP` - Enable/disable (disabled by default, can break resources)
+  - `coepPolicy` - "unsafe-none", "require-corp", "credentialless"
+- **Cross-Origin-Resource-Policy (CORP)** - Controls which origins can embed resource
+  - `enableCORP` - Enable/disable (disabled by default)
+  - `corpPolicy` - "same-site", "same-origin", "cross-origin"
+- Combined COOP + COEP enables cross-origin isolation for SharedArrayBuffer
+
+#### Authentication Examples
+- **`examples/auth_jwt.d`** - Complete JWT authentication example
+  - Uses **jwtlited:phobos** library for production-ready HS256 signing
+  - Token expiration and validation
+  - Claims extraction and role-based access control
+  - Public/protected route patterns
+  - Documented with curl test commands
+  - Best practices comments throughout
+- **`examples/auth_apikey.d`** - Complete API Key authentication example
+  - Header-based (X-API-Key) and query parameter authentication
+  - Key scopes and permissions
+  - Key expiration and disabling
+  - Rate limiting considerations
+  - Documented with curl test commands
+
+### Tests
+- 10 new tests for Cross-Origin headers (COOP, COEP, CORP)
+- Total: 38 modules passing
+
+---
+
+## [0.7.0] - 2025-12-05 "Enterprise Features"
+
+Advanced enterprise patterns and production example.
+
+### Added
+
+#### Rate Limiter Bucket Cleanup
+- **Automatic bucket cleanup** - Removes inactive rate limit buckets
+- `cleanupInterval` - How often to run cleanup (default: 60s)
+- `bucketExpiry` - Remove buckets inactive for this duration (default: 300s)
+- `maxBuckets` - Maximum tracked clients (default: 100,000)
+- `RateLimiterStats` - Track active buckets, cleaned count, max buckets
+- `cleanup()` method - Manual cleanup trigger
+- `getStats()` method - Get current limiter statistics
+- Automatic cleanup on `isAllowed()` calls (periodic)
+- 5 new tests for bucket cleanup
+
+#### Production Server Example
+- **`examples/production_server.d`** - Enterprise-ready server configuration
+  - All v0.7.0 enterprise features demonstrated
+  - Distributed tracing with ConsoleSpanExporter
+  - Security headers (OWASP recommended)
+  - CORS configuration
+  - Rate limiting with bucket cleanup
+  - Circuit breaker
+  - Bulkhead pattern for endpoint groups
+  - Memory pressure monitoring
+  - Prometheus-compatible /metrics endpoint
+  - Environment variable configuration
+
+---
+
 ## [Unreleased] - v0.6.0 "Enterprise Hardening"
 
 Enterprise-grade stability features for high-load deployments.
