@@ -527,3 +527,216 @@ unittest
     // Allow some tolerance for GC background activity, but should be minimal
     assert(allocatedBytes < 1024, "GC allocations detected in release() hot path!");
 }
+
+// ========================================
+// METRICS TESTS (Production Monitoring)
+// ========================================
+
+// Test 27: Pool hits are tracked correctly
+@("pool hits are tracked correctly")
+unittest
+{
+    auto pool = new BufferPool();
+    
+    // First acquire - miss (pool empty)
+    auto b1 = pool.acquire(BufferSize.SMALL);
+    pool.poolHits().shouldEqual(0);
+    pool.poolMisses().shouldEqual(1);
+    
+    // Release and acquire again - should be hit
+    pool.release(b1);
+    auto b2 = pool.acquire(BufferSize.SMALL);
+    pool.poolHits().shouldEqual(1);
+    pool.poolMisses().shouldEqual(1);
+    
+    pool.release(b2);
+}
+
+// Test 28: Pool misses are tracked correctly
+@("pool misses are tracked correctly")
+unittest
+{
+    auto pool = new BufferPool();
+    
+    // All acquires on empty pool are misses
+    auto buffers = new ubyte[][10];
+    foreach (i; 0..10)
+    {
+        buffers[i] = pool.acquire(BufferSize.SMALL);
+    }
+    
+    pool.poolMisses().shouldEqual(10);
+    pool.poolHits().shouldEqual(0);
+    
+    // Cleanup
+    foreach (b; buffers)
+        pool.release(b);
+}
+
+// Test 29: Fallback allocations tracked for oversized requests
+@("fallback allocations tracked for oversized requests")
+unittest
+{
+    auto pool = new BufferPool();
+    
+    // Request larger than HUGE (256KB)
+    auto bigBuffer = pool.acquire(500_000);  // 500KB
+    
+    pool.fallbackAllocs().shouldEqual(1);
+    pool.poolMisses().shouldEqual(0);  // Not a miss, it's fallback
+    
+    // Another oversized request
+    auto bigBuffer2 = pool.acquire(1_000_000);  // 1MB
+    pool.fallbackAllocs().shouldEqual(2);
+}
+
+// Test 30: Pool full drops tracked when pool is exhausted
+@("pool full drops tracked when pool is full")
+unittest
+{
+    auto pool = new BufferPool();
+    
+    // Fill the pool to max (128 buffers per bucket)
+    ubyte[][] buffers;
+    foreach (i; 0..130)  // Acquire 130
+    {
+        buffers ~= pool.acquire(BufferSize.TINY);
+    }
+    
+    // Release all back - 128 should fit, 2 should be dropped
+    foreach (b; buffers)
+        pool.release(b);
+    
+    pool.poolFullDrops().shouldEqual(2);
+}
+
+// Test 31: Hit ratio calculation
+@("hit ratio calculation is correct")
+unittest
+{
+    auto pool = new BufferPool();
+    
+    // Initially no operations
+    pool.hitRatio().shouldEqual(1.0);  // Default when no ops
+    
+    // 1 miss
+    auto b = pool.acquire(BufferSize.SMALL);
+    pool.hitRatio().shouldEqual(0.0);  // 0 hits, 1 miss
+    
+    // Release and acquire (1 hit now)
+    pool.release(b);
+    auto b2 = pool.acquire(BufferSize.SMALL);
+    pool.hitRatio().shouldEqual(0.5);  // 1 hit, 1 miss
+    
+    pool.release(b2);
+    
+    // More hits
+    foreach (i; 0..8)
+    {
+        auto buf = pool.acquire(BufferSize.SMALL);
+        pool.release(buf);
+    }
+    // 9 hits, 1 miss = 0.9
+    pool.hitRatio().shouldBeGreaterThan(0.85);
+}
+
+// Test 32: Global metrics accumulate across operations
+@("global metrics accumulate correctly")
+unittest
+{
+    BufferPool.resetGlobalMetrics();
+    
+    auto pool1 = new BufferPool();
+    auto pool2 = new BufferPool();
+    
+    // Pool misses on both pools
+    auto b1 = pool1.acquire(BufferSize.SMALL);
+    auto b2 = pool2.acquire(BufferSize.SMALL);
+    
+    BufferPool.getGlobalPoolMisses().shouldEqual(2);
+    
+    // Fallback allocs
+    auto big1 = pool1.acquire(500_000);
+    auto big2 = pool2.acquire(500_000);
+    
+    BufferPool.getGlobalFallbackAllocs().shouldEqual(2);
+}
+
+// Test 33: Global metrics reset works
+@("global metrics reset clears counters")
+unittest
+{
+    // Create some activity
+    auto pool = new BufferPool();
+    auto b = pool.acquire(BufferSize.SMALL);
+    auto big = pool.acquire(500_000);
+    
+    // Reset
+    BufferPool.resetGlobalMetrics();
+    
+    BufferPool.getGlobalPoolMisses().shouldEqual(0);
+    BufferPool.getGlobalFallbackAllocs().shouldEqual(0);
+    BufferPool.getGlobalPoolFullDrops().shouldEqual(0);
+}
+
+// Test 34: Thread-local metrics are independent
+@("thread-local metrics are independent per pool")
+unittest
+{
+    auto pool1 = new BufferPool();
+    auto pool2 = new BufferPool();
+    
+    // Activity on pool1
+    auto b1 = pool1.acquire(BufferSize.SMALL);
+    pool1.release(b1);
+    auto b1b = pool1.acquire(BufferSize.SMALL);
+    
+    // Pool1: 1 miss, 1 hit
+    pool1.poolMisses().shouldEqual(1);
+    pool1.poolHits().shouldEqual(1);
+    
+    // Pool2: should be zero
+    pool2.poolMisses().shouldEqual(0);
+    pool2.poolHits().shouldEqual(0);
+    
+    // Activity on pool2
+    auto b2 = pool2.acquire(BufferSize.MEDIUM);
+    pool2.poolMisses().shouldEqual(1);
+}
+
+// Test 35: Metrics survive high load
+@("metrics accurate under high load")
+unittest
+{
+    BufferPool.resetGlobalMetrics();
+    auto pool = new BufferPool();
+    
+    enum ITERATIONS = 10_000;
+    
+    // First round: all misses
+    ubyte[][] buffers;
+    foreach (i; 0..100)
+        buffers ~= pool.acquire(BufferSize.SMALL);
+    
+    pool.poolMisses().shouldEqual(100);
+    pool.poolHits().shouldEqual(0);
+    
+    // Release all
+    foreach (b; buffers)
+        pool.release(b);
+    buffers.length = 0;
+    
+    // Second round: all hits (from pool)
+    foreach (i; 0..100)
+    {
+        auto b = pool.acquire(BufferSize.SMALL);
+        pool.release(b);
+    }
+    
+    // 100 more hits
+    pool.poolHits().shouldEqual(100);
+    pool.poolMisses().shouldEqual(100);  // Still 100 from first round
+    
+    // Ratio should be 0.5
+    pool.hitRatio().shouldEqual(0.5);
+}

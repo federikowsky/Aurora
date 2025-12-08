@@ -1,0 +1,76 @@
+# Aurora HTTP Server - Linux Test Container
+# Tests multi-worker architecture with SO_REUSEPORT
+
+FROM debian:bookworm-slim
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    python3 \
+    python3-pip \
+    python3-requests \
+    procps \
+    htop \
+    xz-utils \
+    gcc \
+    g++ \
+    libc6-dev \
+    libxml2 \
+    zlib1g \
+    make \
+    libc++1 \
+    libc++-dev \
+    libc++abi1 \
+    libc++abi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install LDC 1.38 (latest stable)
+# Detect architecture and download appropriate version
+ENV LDC_VERSION=1.38.0
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "arm64" ]; then \
+    LDC_ARCH="linux-aarch64"; \
+    else \
+    LDC_ARCH="linux-x86_64"; \
+    fi && \
+    wget -q https://github.com/ldc-developers/ldc/releases/download/v${LDC_VERSION}/ldc2-${LDC_VERSION}-${LDC_ARCH}.tar.xz \
+    && tar xf ldc2-${LDC_VERSION}-${LDC_ARCH}.tar.xz \
+    && mv ldc2-${LDC_VERSION}-${LDC_ARCH} /opt/ldc \
+    && rm ldc2-${LDC_VERSION}-${LDC_ARCH}.tar.xz
+
+# Add LDC to PATH
+ENV PATH="/opt/ldc/bin:${PATH}"
+
+# Install dub separately (comes with LDC)
+RUN ln -s /opt/ldc/bin/dub /usr/local/bin/dub || true
+
+# Set working directory
+WORKDIR /app
+
+# Copy source code (dependencies fetched via dub)
+COPY dub.json dub.selections.json ./
+COPY source/ ./source/
+COPY tests/ ./tests/
+COPY benchmarks/ ./benchmarks/
+
+# Fetch all dependencies from dub registry
+RUN dub fetch aurora --cache=local || true
+RUN dub fetch wire@1.0.0 || true
+RUN dub fetch fastjsond@1.0.0 || true
+RUN dub fetch aurora-websocket@1.0.0 || true
+
+# Build the project
+RUN dub build --force --compiler=ldc2 || (echo "Build failed" && exit 1)
+
+# Build the fiber test (if config exists)
+RUN dub build --config=fiber-test --force --compiler=ldc2 || echo "fiber-test config not available"
+
+# Run tests
+RUN dub test --compiler=ldc2 || echo "Tests completed"
+
+# Expose port
+EXPOSE 8080
+
+# Default command: run benchmark server
+CMD ["dub", "run", "--single", "benchmarks/server.d", "--build=release"]

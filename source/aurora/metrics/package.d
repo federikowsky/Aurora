@@ -166,6 +166,199 @@ class Histogram
 }
 
 /**
+ * PercentileHistogram - histogram with percentile tracking
+ * 
+ * Uses reservoir sampling to maintain a fixed-size sample of observations.
+ * Supports calculating P50, P90, P95, P99 percentiles.
+ * 
+ * Thread-safe via synchronized access to reservoir.
+ */
+class PercentileHistogram
+{
+    private shared long _count = 0;
+    private shared double _sum = 0;
+    private string name;
+    private string[string] labels;
+    
+    // Reservoir for percentile calculation
+    private enum RESERVOIR_SIZE = 1000;
+    private double[] reservoir;
+    private size_t reservoirIndex = 0;
+    private bool reservoirFull = false;
+    private Mutex reservoirMutex;
+    
+    // Cached percentiles (recalculated on demand)
+    private bool percentilesDirty = true;
+    private double cachedP50 = 0;
+    private double cachedP90 = 0;
+    private double cachedP95 = 0;
+    private double cachedP99 = 0;
+    
+    this(string name, string[string] labels = null) @trusted
+    {
+        this.name = name;
+        this.labels = labels;
+        this.reservoir = new double[RESERVOIR_SIZE];
+        this.reservoirMutex = new Mutex();
+    }
+    
+    /// Record an observation
+    void observe(double value) @trusted
+    {
+        atomicOp!"+="(_count, 1);
+        
+        // Atomic double add for sum
+        double oldSum, newSum;
+        do
+        {
+            oldSum = atomicLoad(_sum);
+            newSum = oldSum + value;
+        } while (!cas(&_sum, oldSum, newSum));
+        
+        // Add to reservoir (thread-safe)
+        synchronized (reservoirMutex)
+        {
+            reservoir[reservoirIndex] = value;
+            reservoirIndex = (reservoirIndex + 1) % RESERVOIR_SIZE;
+            if (reservoirIndex == 0)
+                reservoirFull = true;
+            percentilesDirty = true;
+        }
+    }
+    
+    /// Get total count
+    long count()
+    {
+        return atomicLoad(_count);
+    }
+    
+    /// Get sum of all observations
+    double sum()
+    {
+        return atomicLoad(_sum);
+    }
+    
+    /// Get mean (average)
+    double mean()
+    {
+        auto c = count();
+        if (c == 0) return 0;
+        return sum() / c;
+    }
+    
+    /// Get P50 (median)
+    double p50() @trusted
+    {
+        calculatePercentiles();
+        return cachedP50;
+    }
+    
+    /// Get P90
+    double p90() @trusted
+    {
+        calculatePercentiles();
+        return cachedP90;
+    }
+    
+    /// Get P95
+    double p95() @trusted
+    {
+        calculatePercentiles();
+        return cachedP95;
+    }
+    
+    /// Get P99
+    double p99() @trusted
+    {
+        calculatePercentiles();
+        return cachedP99;
+    }
+    
+    /// Get arbitrary percentile (0-100)
+    double percentile(double p) @trusted
+    {
+        if (p < 0 || p > 100) return 0;
+        
+        synchronized (reservoirMutex)
+        {
+            auto sampleSize = reservoirFull ? RESERVOIR_SIZE : reservoirIndex;
+            if (sampleSize == 0) return 0;
+            
+            auto sorted = reservoir[0 .. sampleSize].dup;
+            import std.algorithm : sort;
+            sorted.sort();
+            
+            auto idx = cast(size_t)((p / 100.0) * (sampleSize - 1));
+            return sorted[idx];
+        }
+    }
+    
+    /// Reset the histogram
+    void reset() @trusted
+    {
+        atomicStore(_count, 0);
+        atomicStore(_sum, 0.0);
+        
+        synchronized (reservoirMutex)
+        {
+            reservoirIndex = 0;
+            reservoirFull = false;
+            percentilesDirty = true;
+            cachedP50 = cachedP90 = cachedP95 = cachedP99 = 0;
+        }
+    }
+    
+    /// Export as Prometheus format
+    string toPrometheus() @trusted
+    {
+        import std.format : format;
+        import std.array : appender;
+        
+        auto result = appender!string();
+        
+        result ~= format("# TYPE %s histogram\n", name);
+        result ~= format("%s_count %d\n", name, count());
+        result ~= format("%s_sum %g\n", name, sum());
+        
+        // Percentile quantiles (Prometheus style)
+        calculatePercentiles();
+        result ~= format("%s{quantile=\"0.5\"} %g\n", name, cachedP50);
+        result ~= format("%s{quantile=\"0.9\"} %g\n", name, cachedP90);
+        result ~= format("%s{quantile=\"0.95\"} %g\n", name, cachedP95);
+        result ~= format("%s{quantile=\"0.99\"} %g\n", name, cachedP99);
+        
+        return result.data;
+    }
+    
+    private void calculatePercentiles() @trusted
+    {
+        synchronized (reservoirMutex)
+        {
+            if (!percentilesDirty) return;
+            
+            auto sampleSize = reservoirFull ? RESERVOIR_SIZE : reservoirIndex;
+            if (sampleSize == 0)
+            {
+                cachedP50 = cachedP90 = cachedP95 = cachedP99 = 0;
+                percentilesDirty = false;
+                return;
+            }
+            
+            auto sorted = reservoir[0 .. sampleSize].dup;
+            import std.algorithm : sort;
+            sorted.sort();
+            
+            cachedP50 = sorted[cast(size_t)(0.50 * (sampleSize - 1))];
+            cachedP90 = sorted[cast(size_t)(0.90 * (sampleSize - 1))];
+            cachedP95 = sorted[cast(size_t)(0.95 * (sampleSize - 1))];
+            cachedP99 = sorted[cast(size_t)(0.99 * (sampleSize - 1))];
+            
+            percentilesDirty = false;
+        }
+    }
+}
+
+/**
  * Timer scope - RAII timer that records on destruction
  */
 struct TimerScope
@@ -372,6 +565,40 @@ class Metrics
     }
     
     /**
+     * Get or create a percentile histogram.
+     * Uses thread-local cache for hot path performance.
+     */
+    private static PercentileHistogram[string] tlPercentileCache;
+    private __gshared PercentileHistogram[string] percentileHistograms;
+    
+    PercentileHistogram percentileHistogram(T...)(string name, T labelPairs)
+    {
+        auto key = makeKey(name, labelPairs);
+        
+        // Fast path: check thread-local cache
+        if (auto cached = key in tlPercentileCache)
+            return *cached;
+        
+        // Slow path: check global registry
+        PercentileHistogram result;
+        synchronized (metricsMutex)
+        {
+            if (auto existing = key in percentileHistograms)
+            {
+                result = *existing;
+            }
+            else
+            {
+                result = new PercentileHistogram(name, makeLabels(labelPairs));
+                percentileHistograms[key] = result;
+            }
+        }
+        
+        tlPercentileCache[key] = result;
+        return result;
+    }
+    
+    /**
      * Get or create a timer.
      * Uses thread-local cache for hot path performance.
      */
@@ -445,6 +672,9 @@ class Metrics
             
             foreach (timer; timers)
                 timer.reset();
+            
+            foreach (phist; percentileHistograms)
+                phist.reset();
         }
     }
     
@@ -509,6 +739,12 @@ class Metrics
                 result ~= format("# TYPE %s histogram\n", name);
                 result ~= format("%s_count %d\n", name, hist.count());
                 result ~= format("%s_sum %g\n", name, hist.sum());
+            }
+            
+            // Percentile histograms with quantiles
+            foreach (name, phist; percentileHistograms)
+            {
+                result ~= phist.toPrometheus();
             }
         }
         

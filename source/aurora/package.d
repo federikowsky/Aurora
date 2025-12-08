@@ -58,6 +58,9 @@ public import aurora.logging;
 // Metrics
 public import aurora.metrics;
 
+// Distributed Tracing (OpenTelemetry-compatible)
+public import aurora.tracing;
+
 // Memory management (advanced usage)
 public import aurora.mem;
 

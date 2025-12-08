@@ -42,9 +42,12 @@ struct HTTPRequest
      */
     static HTTPRequest parse(scope ubyte[] data)
     {
+        import wire.bindings : llhttp_errno;
         HTTPRequest req;
         req.wrapper = parseHTTP(data);
-        req.valid = cast(bool)req.wrapper;  // Uses opCast
+        // Valid if no error OR if it's an upgrade request (HPE_PAUSED_UPGRADE)
+        auto errorCode = req.wrapper.request.content.errorCode;
+        req.valid = (errorCode == 0 || errorCode == llhttp_errno.HPE_PAUSED_UPGRADE);
         return req;
     }
     
@@ -124,10 +127,10 @@ struct HTTPRequest
     /**
      * Get header by name (case-insensitive)
      */
-    string getHeader(string name)
+    string getHeader(string name) const @trusted
     {
         if (!valid) return "";
-        return wrapper.getHeader(name).toString();
+        return (cast()wrapper).getHeader(name).toString();
     }
     
     /**

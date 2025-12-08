@@ -63,6 +63,9 @@ void main(string[] args)
     
     app = new App(config);
     
+    // Colored logging for request details
+    app.useLogger();
+    
     // === TEST ENDPOINTS ===
     
     // Minimal response (test raw throughput)

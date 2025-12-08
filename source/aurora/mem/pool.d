@@ -43,6 +43,8 @@ else version(Windows)
 public import aurora.mem.object_pool;
 public import aurora.mem.arena;
 
+import core.atomic : atomicOp, atomicLoad;
+
 /**
  * Buffer size buckets (power-of-2 for alignment)
  */
@@ -75,6 +77,7 @@ private immutable size_t[NUM_BUCKETS] BUCKET_SIZES = [
  * - Index-based bucket management for DRY code
  * - Cache-line aligned allocations (64 bytes)
  * - Tracks non-pooled buffers to prevent double-free
+ * - Metrics for monitoring pool exhaustion
  */
 class BufferPool
 {
@@ -89,6 +92,17 @@ class BufferPool
     // Track non-pooled buffers to prevent double-free
     private void*[256] allocatedBuffers;
     private size_t allocatedCount;
+    
+    // === Metrics (Production Monitoring) ===
+    private size_t _poolHits;           // Buffer returned from pool
+    private size_t _poolMisses;         // New buffer allocated (pool empty)
+    private size_t _fallbackAllocs;     // Oversized buffer (larger than HUGE)
+    private size_t _poolFullDrops;      // Buffer freed because pool was full
+    
+    // Global metrics (thread-safe, for aggregation)
+    private static shared ulong globalPoolMisses;
+    private static shared ulong globalFallbackAllocs;
+    private static shared ulong globalPoolFullDrops;
     
     /**
      * Create a new buffer pool (thread-local).
@@ -114,6 +128,8 @@ class BufferPool
         if (bucketIdx < 0)
         {
             // Non-standard size (larger than HUGE), allocate directly
+            _fallbackAllocs++;
+            atomicOp!"+="(globalFallbackAllocs, 1);
             return allocateNonPooledBuffer(size);
         }
         
@@ -123,10 +139,13 @@ class BufferPool
         if (freeCounts[bucketIdx] > 0)
         {
             freeCounts[bucketIdx]--;
+            _poolHits++;
             return freeLists[bucketIdx][freeCounts[bucketIdx]];
         }
         
-        // Pool empty, allocate new buffer
+        // Pool empty, allocate new buffer (pool miss)
+        _poolMisses++;
+        atomicOp!"+="(globalPoolMisses, 1);
         return allocateBuffer(bucketSize);
     }
     
@@ -162,6 +181,8 @@ class BufferPool
         if (freeCounts[bucketIdx] >= MAX_BUFFERS_PER_BUCKET)
         {
             // Pool is full, free the buffer instead
+            _poolFullDrops++;
+            atomicOp!"+="(globalPoolFullDrops, 1);
             free(buffer.ptr);
             return;
         }
@@ -210,6 +231,61 @@ class BufferPool
     ~this()
     {
         cleanup();
+    }
+    
+    // ========================================
+    // Metrics (Thread-local)
+    // ========================================
+    
+    /// Get pool hit count (buffer returned from pool)
+    size_t poolHits() const @safe nothrow { return _poolHits; }
+    
+    /// Get pool miss count (new allocation because pool empty)
+    size_t poolMisses() const @safe nothrow { return _poolMisses; }
+    
+    /// Get fallback allocation count (oversized buffers)
+    size_t fallbackAllocs() const @safe nothrow { return _fallbackAllocs; }
+    
+    /// Get pool full drops (buffer freed because pool was full)
+    size_t poolFullDrops() const @safe nothrow { return _poolFullDrops; }
+    
+    /// Get hit ratio (0.0 - 1.0)
+    double hitRatio() const @safe nothrow
+    {
+        auto total = _poolHits + _poolMisses;
+        if (total == 0) return 1.0;
+        return cast(double)_poolHits / total;
+    }
+    
+    // ========================================
+    // Global Metrics (Thread-safe)
+    // ========================================
+    
+    /// Get global pool miss count across all threads
+    static ulong getGlobalPoolMisses() @safe nothrow
+    {
+        return atomicLoad(globalPoolMisses);
+    }
+    
+    /// Get global fallback allocation count across all threads
+    static ulong getGlobalFallbackAllocs() @safe nothrow
+    {
+        return atomicLoad(globalFallbackAllocs);
+    }
+    
+    /// Get global pool full drops across all threads
+    static ulong getGlobalPoolFullDrops() @safe nothrow
+    {
+        return atomicLoad(globalPoolFullDrops);
+    }
+    
+    /// Reset global metrics (for testing)
+    static void resetGlobalMetrics() @safe nothrow
+    {
+        import core.atomic : atomicStore;
+        atomicStore(globalPoolMisses, cast(ulong)0);
+        atomicStore(globalFallbackAllocs, cast(ulong)0);
+        atomicStore(globalPoolFullDrops, cast(ulong)0);
     }
     
     // ========================================

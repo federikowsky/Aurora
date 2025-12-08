@@ -9,3 +9,4 @@ public import aurora.web.router;
 public import aurora.web.middleware;
 public import aurora.web.decorators;
 public import aurora.web.router_mixin;
+public import aurora.web.upgrade;

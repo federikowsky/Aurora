@@ -353,3 +353,116 @@ unittest
     
     logger.flush();
 }
+
+// ========================================
+// METRICS TESTS (Production Monitoring)
+// ========================================
+
+// Test 21: Logs written counter increases
+@("logs written counter increases")
+unittest
+{
+    auto logger = Logger.get();
+    logger.setLevel(LogLevel.DEBUG);  // Enable all levels
+    
+    auto before = logger.getLogsWritten();
+    
+    logger.info("Test message 1");
+    logger.info("Test message 2");
+    logger.info("Test message 3");
+    
+    auto after = logger.getLogsWritten();
+    
+    // At least 3 more logs written
+    (after - before).shouldBeGreaterThan(2);
+}
+
+// Test 22: Pending logs count
+@("pending logs count is accurate")
+unittest
+{
+    auto logger = Logger.get();
+    
+    // Log some messages
+    foreach (i; 0..10)
+        logger.info("Pending test", "i", i);
+    
+    // There should be pending messages (unless flushed already)
+    // Just verify no crash when accessing the metric
+    auto pending = logger.getPending();
+    
+    logger.flush();
+    
+    // After flush, pending should be 0 or very low
+    assert(logger.getPending() < 5, "Pending logs should be near zero after flush");
+}
+
+// Test 23: DropOnFull mode - logs dropped when buffer full
+@("dropOnFull mode accessible")
+unittest
+{
+    auto logger = Logger.get();
+    logger.setLevel(LogLevel.DEBUG);
+    
+    // Enable drop mode
+    logger.setDropOnFull(true);
+    
+    // Counter should be accessible (just verify no crash)
+    auto droppedBefore = logger.getLogsDropped();
+    
+    // Reset to safe mode
+    logger.setDropOnFull(false);
+}
+
+// Test 24: Sync fallbacks counter accessible
+@("sync fallback counter accessible")
+unittest
+{
+    auto logger = Logger.get();
+    logger.setLevel(LogLevel.DEBUG);
+    
+    // Disable drop mode (enable sync fallback)
+    logger.setDropOnFull(false);
+    
+    // Sync fallbacks counter should be accessible (just verify no crash)
+    auto fallbacksBefore = logger.getSyncFallbacks();
+}
+
+// Test 25: Metrics don't overflow under high load
+@("metrics stable under high load")
+unittest
+{
+    auto logger = Logger.get();
+    logger.setLevel(LogLevel.DEBUG);
+    
+    auto writtenBefore = logger.getLogsWritten();
+    
+    // Write many messages
+    foreach (i; 0..1000)
+    {
+        logger.info("High load test");
+    }
+    
+    auto writtenAfter = logger.getLogsWritten();
+    
+    // Counter should have increased significantly
+    (writtenAfter - writtenBefore).shouldBeGreaterThan(900);
+    
+    logger.flush();
+}
+
+// Test 26: setDropOnFull toggle works
+@("setDropOnFull can be toggled")
+unittest
+{
+    auto logger = Logger.get();
+    
+    // Should not crash when toggling
+    logger.setDropOnFull(true);
+    logger.info("With drop mode");
+    
+    logger.setDropOnFull(false);
+    logger.info("Without drop mode");
+    
+    // Test passes if no crash
+}

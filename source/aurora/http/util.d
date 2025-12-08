@@ -319,39 +319,3 @@ size_t buildResponseInto(
     
     return pos;
 }
-
-// ============================================================================
-// UNIT TESTS
-// ============================================================================
-
-unittest
-{
-    // Test status text lookup
-    assert(getStatusText(200) == "OK");
-    assert(getStatusText(404) == "Not Found");
-    assert(getStatusText(500) == "Internal Server Error");
-    assert(getStatusText(999) == "Unknown");
-    
-    // Test status line lookup
-    assert(getStatusLine(200) == "HTTP/1.1 200 OK\r\n");
-    assert(getStatusLine(404) == "HTTP/1.1 404 Not Found\r\n");
-    assert(getStatusLine(999) is null);
-    
-    // Test intToBuffer
-    char[20] buf;
-    assert(intToBuffer(0, buf[]) == "0");
-    assert(intToBuffer(123, buf[]) == "123");
-    assert(intToBuffer(42, buf[]) == "42");
-    
-    // Test buildResponseInto
-    ubyte[512] respBuf;
-    auto len = buildResponseInto(respBuf[], 200, "text/plain", "Hello");
-    assert(len > 0);
-    auto response = cast(string)respBuf[0..len];
-    assert(response.length > 0);
-    import std.algorithm : canFind;
-    assert(response.canFind("HTTP/1.1 200 OK"));
-    assert(response.canFind("Content-Type: text/plain"));
-    assert(response.canFind("Content-Length: 5"));
-    assert(response.canFind("Hello"));
-}

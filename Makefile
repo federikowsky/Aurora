@@ -1,148 +1,131 @@
 # ============================================================================
-# Aurora - High-Performance HTTP Framework for D
+# Aurora v1.0.0 - High-Performance HTTP Framework for D
+# ============================================================================
+#
+# All dependencies (wire, fastjsond, aurora-websocket) are managed by DUB.
+# This Makefile provides convenient shortcuts for common operations.
+#
 # ============================================================================
 
-# Compiler Configuration
-DC       := ldc2
-AR       := ar
+.PHONY: all build release test test-cov benchmark examples clean help
 
-# Directories
-BUILD_DIR    := build
-SRC_DIR      := source
-TEST_DIR     := tests
-EXAMPLES_DIR := examples
-
-# Wire dependency (git submodule in lib/wire)
-WIRE_DIR     := lib/wire
-WIRE_SRC     := $(WIRE_DIR)/source
-WIRE_LIB     := $(WIRE_DIR)/build/libwire.a
-
-# Fastjsond dependency (git submodule in lib/fastjsond)
-FASTJSOND_DIR := lib/fastjsond
-FASTJSOND_SRC := $(FASTJSOND_DIR)/source
-FASTJSOND_LIB := $(FASTJSOND_DIR)/build/libfastjsond.a
-
-# Output
-LIB_NAME     := libaurora.a
-LIB_OUT      := $(BUILD_DIR)/$(LIB_NAME)
-
-# Compiler Flags
-DFLAGS       := -O3 -mcpu=native -I$(SRC_DIR) -I$(WIRE_SRC) -I$(FASTJSOND_SRC)
-DFLAGS_DEBUG := -g -I$(SRC_DIR) -I$(WIRE_SRC) -I$(FASTJSOND_SRC)
-DFLAGS_LIB   := $(DFLAGS) -lib -oq
-
-# Linker flags for Wire and Fastjsond
-LDFLAGS      := -L$(WIRE_DIR)/build -lwire -L$(FASTJSOND_DIR)/build -lfastjsond -L-lc++
-
-# Source Files (all D files in source/aurora)
-D_SOURCES := $(shell find $(SRC_DIR) -name '*.d')
-
-# Example sources and targets (auto-discovered)
-EXAMPLE_SOURCES := $(wildcard $(EXAMPLES_DIR)/*.d)
-EXAMPLE_TARGETS := $(patsubst $(EXAMPLES_DIR)/%.d,$(BUILD_DIR)/%,$(EXAMPLE_SOURCES))
+# Default target
+all: build
 
 # ============================================================================
-# Phony Targets
-# ============================================================================
-
-.PHONY: all clean lib test help info check-wire examples
-
-# Default Target
-all: lib
-
 # Help
+# ============================================================================
+
 help:
-	@echo "=========================================================="
-	@echo "  make all           - Build library (default)"
-	@echo "  make lib           - Build static library"
-	@echo "  make test          - Run tests via DUB"
-	@echo "  make examples      - Build example servers"
-	@echo "  make clean         - Remove all build artifacts"
-	@echo "  make info          - Show build configuration"
-	@echo "  make help          - Show this help message"
+	@echo "╔════════════════════════════════════════════════════════════╗"
+	@echo "║        Aurora HTTP Framework v1.0.0 - Build System         ║"
+	@echo "╚════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@echo "Build directory: $(BUILD_DIR)/"
-	@echo "Library output:  $(LIB_OUT)"
+	@echo "Usage: make <target>"
+	@echo ""
+	@echo "Build Targets:"
+	@echo "  all, build    Build library (debug mode)"
+	@echo "  release       Build library (release mode, optimized)"
+	@echo ""
+	@echo "Test Targets:"
+	@echo "  test          Run unit tests"
+	@echo "  test-cov      Run tests with coverage report"
+	@echo ""
+	@echo "Benchmark:"
+	@echo "  benchmark     Start benchmark server (release mode)"
+	@echo ""
+	@echo "Examples:"
+	@echo "  examples      List available examples"
+	@echo "  run-example   Run example (use: make run-example E=minimal_server)"
+	@echo ""
+	@echo "Utility:"
+	@echo "  clean         Remove build artifacts"
+	@echo "  deps          Fetch/update DUB dependencies"
+	@echo "  info          Show build configuration"
+	@echo ""
 
 # ============================================================================
-# Build Rules
+# Build Targets
 # ============================================================================
 
-# Create build directory
-$(BUILD_DIR):
-	@mkdir -p $(BUILD_DIR)
+build:
+	@echo "Building Aurora (debug)..."
+	@dub build
+	@echo "✓ Build complete"
 
-# Check Wire dependency
-check-wire:
-	@if [ ! -f $(WIRE_LIB) ]; then \
-		echo "Building Wire dependency..."; \
-		$(MAKE) -C $(WIRE_DIR) lib; \
-	fi
+release:
+	@echo "Building Aurora (release)..."
+	@dub build --build=release
+	@echo "✓ Release build complete"
 
-# Check Fastjsond dependency
-check-fastjsond:
-	@if [ ! -f $(FASTJSOND_LIB) ]; then \
-		echo "Building Fastjsond dependency..."; \
-		$(MAKE) -C $(FASTJSOND_DIR) lib; \
-	fi
+# ============================================================================
+# Test Targets
+# ============================================================================
 
-# Build static library
-lib: check-wire check-fastjsond $(LIB_OUT)
-
-$(LIB_OUT): $(D_SOURCES) | $(BUILD_DIR)
-	@echo "[DC] Building library: $@"
-	@$(DC) $(DFLAGS_LIB) $(D_SOURCES) -of=$@ -od=$(BUILD_DIR)
-	@echo "✓ Library built: $@"
-	@echo "  Size: $$(du -h $@ | cut -f1)"
-
-# Run tests via DUB (unit-threaded needs DUB for dependency resolution)
-test: check-wire check-fastjsond
-	@echo "Running tests via DUB..."
+test:
+	@echo "Running tests..."
 	@dub test
+	@echo "✓ Tests complete"
+
+test-cov:
+	@echo "Running tests with coverage..."
+	@mkdir -p coverage
+	@dub test --config=unittest-cov
+	@mv *.lst coverage/ 2>/dev/null || true
+	@echo "✓ Coverage report in coverage/"
 
 # ============================================================================
-# Examples (Pattern Rule - builds any example automatically)
+# Benchmark
 # ============================================================================
 
-# Pattern rule: build any example from examples/*.d
-$(BUILD_DIR)/%: $(EXAMPLES_DIR)/%.d $(LIB_OUT) | $(BUILD_DIR)
-	@echo "[DC] Building $*..."
-	@$(DC) $(DFLAGS) $< $(LIB_OUT) $(WIRE_LIB) $(FASTJSOND_LIB) -of=$@ -od=$(BUILD_DIR) -L-lc++
-	@echo "✓ Built: $@"
-
-# Build all examples
-examples: $(EXAMPLE_TARGETS)
-	@echo "✓ All examples built in $(BUILD_DIR)/"
-	@echo "  Targets: $(notdir $(EXAMPLE_TARGETS))"
+benchmark:
+	@echo "Starting benchmark server (release mode)..."
+	@echo "Use wrk or hey to test: http://localhost:8080/"
+	@dub run --single benchmarks/server.d --build=release
 
 # ============================================================================
-# Utility Targets
+# Examples
 # ============================================================================
 
-# Clean build artifacts
+examples:
+	@echo "Available examples:"
+	@echo ""
+	@ls -1 examples/*.d | sed 's/examples\//  /' | sed 's/\.d$$//'
+	@echo ""
+	@echo "Run with: make run-example E=<name>"
+	@echo "Example:  make run-example E=minimal_server"
+
+run-example:
+ifndef E
+	@echo "Error: specify example name with E=<name>"
+	@echo "Example: make run-example E=minimal_server"
+	@exit 1
+endif
+	@echo "Running example: $(E)"
+	@dub run --single examples/$(E).d
+
+# ============================================================================
+# Utility
+# ============================================================================
+
+deps:
+	@echo "Fetching dependencies..."
+	@dub fetch --cache=local
+	@echo "✓ Dependencies ready"
+
 clean:
 	@echo "Cleaning build artifacts..."
-	@rm -rf $(BUILD_DIR)
-	@rm -f aurora libaurora.a
+	@rm -rf .dub build coverage
+	@rm -f *.lst *.a aurora
+	@rm -f dub.selections.json
 	@echo "✓ Clean complete"
 
-# Show build info
 info:
-	@echo "Build Configuration"
-	@echo "==================="
-	@echo "D Compiler:    $(DC)"
-	@echo "D Flags:       $(DFLAGS)"
-	@echo "Build Dir:     $(BUILD_DIR)"
-	@echo "Wire Dir:      $(WIRE_DIR)"
-	@echo "Fastjsond Dir: $(FASTJSOND_DIR)"
+	@echo "Aurora HTTP Framework v1.0.0"
 	@echo ""
-	@echo "Source Files"
-	@echo "============"
-	@echo "D Sources:     $(words $(D_SOURCES)) files"
+	@echo "Dependencies (from dub.json):"
+	@grep -E '^\s+"[a-z-]+":' dub.json | head -10
 	@echo ""
-	@echo "Output"
-	@echo "======"
-	@echo "Library:       $(LIB_OUT)"
-
-# Rebuild everything
-rebuild: clean all
+	@echo "D Compiler:"
+	@dub --version | head -1
+	@ldc2 --version | head -1 || dmd --version | head -1 || echo "No D compiler found"

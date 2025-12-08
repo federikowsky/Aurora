@@ -181,6 +181,12 @@ private struct LogRingBuffer
 
 /**
  * Logger - High-performance async logger
+ * 
+ * Features:
+ * - Lock-free ring buffer
+ * - Background flush thread
+ * - Configurable behavior on buffer full (drop vs sync)
+ * - Metrics for monitoring
  */
 class Logger
 {
@@ -194,6 +200,7 @@ class Logger
     private LogOutput outputType = LogOutput.STDOUT;
     private File outputFile;
     private string logFilePath;
+    private bool dropOnFull = false;  // If true, drop logs when buffer full (better latency)
     
     // Lock-free ring buffer
     private __gshared LogRingBuffer buffer;
@@ -203,6 +210,11 @@ class Logger
     private shared bool running = true;
     private Mutex flushMutex;
     private Condition flushCondition;
+    
+    // === Metrics ===
+    private shared ulong logsWritten = 0;
+    private shared ulong logsDropped = 0;
+    private shared ulong syncFallbacks = 0;
     
     static this()
     {
@@ -275,6 +287,38 @@ class Logger
             }
         }
     }
+    
+    /**
+     * Set behavior when ring buffer is full.
+     * 
+     * Params:
+     *   drop = If true, drop logs when buffer is full (better latency).
+     *          If false, fallback to synchronous write (may block, no log loss).
+     */
+    void setDropOnFull(bool drop) @safe nothrow
+    {
+        dropOnFull = drop;
+    }
+    
+    // ========================================
+    // Metrics
+    // ========================================
+    
+    /// Get total logs written to ring buffer
+    ulong getLogsWritten() @safe nothrow { return atomicLoad(logsWritten); }
+    
+    /// Get total logs dropped (when dropOnFull=true and buffer was full)
+    ulong getLogsDropped() @safe nothrow { return atomicLoad(logsDropped); }
+    
+    /// Get total sync fallbacks (when dropOnFull=false and buffer was full)
+    ulong getSyncFallbacks() @safe nothrow { return atomicLoad(syncFallbacks); }
+    
+    /// Get current pending logs in buffer
+    size_t getPending() @trusted nothrow { return buffer.pending(); }
+    
+    // ========================================
+    // Log methods
+    // ========================================
     
     /**
      * Log debug message
@@ -385,11 +429,26 @@ class Logger
         // Write to ring buffer (lock-free)
         if (!buffer.tryWrite(level, logEntry))
         {
-            // Buffer full - fallback to direct write (rare)
-            synchronized (flushMutex)
+            // Buffer full
+            if (dropOnFull)
             {
-                try { outputFile.writeln(logEntry); } catch (Exception) {}
+                // Drop the log (better latency, may lose logs)
+                atomicOp!"+="(logsDropped, 1);
+                return;
             }
+            else
+            {
+                // Fallback to direct write (blocks, but no log loss)
+                atomicOp!"+="(syncFallbacks, 1);
+                synchronized (flushMutex)
+                {
+                    try { outputFile.writeln(logEntry); } catch (Exception) {}
+                }
+            }
+        }
+        else
+        {
+            atomicOp!"+="(logsWritten, 1);
         }
         
         // Wake up flush thread if buffer is getting full

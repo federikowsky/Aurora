@@ -11,22 +11,26 @@
         "vibe-core": "~>2.8.6",
         "eventcore": "~>0.9.0",
         "mir-algorithm": "~>3.22.0",
-        "unit-threaded": "~>2.1.9"
+        "unit-threaded": "~>2.1.9",
+        "aurora-websocket": "~>1.0.0",
+        "wire": "~>1.0.0",
+        "fastjsond": "~>1.0.0"
     },
-    "libs": [
-        "wire",
-        "fastjsond",
+    "libs-linux": [
+        "stdc++"
+    ],
+    "libs-osx": [
         "c++"
     ],
     "importPaths": [
-        "source",
-        "lib/wire/source",
-        "lib/fastjsond/source"
+        "source"
     ],
-    "lflags": [
-        "-Llib/wire/build",
-        "-Llib/fastjsond/build"
-    ],
+    "buildTypes": {
+        "release": {
+            "dflags-ldc2": ["-O2", "-release", "-enable-inlining"],
+            "dflags-dmd": ["-O", "-release", "-inline"]
+        }
+    },
     "configurations": [
         {
             "name": "library",
@@ -51,8 +55,9 @@
             ],
             "mainSourceFile": "tests/runner.d",
             "excludedSourceFiles": [
-                "tests/unit/web/middleware.disabled/*",
-                "tests/unit/runtime/*"
+                
+                "tests/realworld/*",
+                "tests/stress/*"
             ],
             "dflags": [
                 "-unittest"
@@ -76,6 +81,11 @@
                 "tests"
             ],
             "mainSourceFile": "tests/runner.d",
+            "excludedSourceFiles": [
+                
+                "tests/realworld/*",
+                "tests/stress/*"
+            ],
             "dflags": [
                 "-unittest",
                 "-cov"
@@ -106,38 +116,23 @@
                 "source",
                 "/Users/federicofilippi/Desktop/D/Wire/source"
             ]
-        }
-    ],
-    "buildTypes": {
-        "debug": {
-            "buildOptions": [
-                "debugMode",
-                "debugInfo"
-            ]
         },
-        "release": {
-            "buildOptions": [
-                "releaseMode",
-                "optimize",
-                "inline"
-            ],
-            "dflags-ldc": [
-                "-O3",
-                "-release"
-            ]
+        {
+            "name": "test-server",
+            "targetType": "executable",
+            "targetName": "test_server",
+            "mainSourceFile": "tests/integration/test_server.d",
+            "sourceFiles": ["tests/integration/test_server.d"],
+            "excludedSourceFiles": ["source/**/*", "tests/**/*"],
+            "importPaths": ["source"]
         },
-        "release-nobounds": {
-            "buildOptions": [
-                "releaseMode",
-                "optimize",
-                "inline",
-                "noBoundsCheck"
-            ],
-            "dflags-ldc": [
-                "-O3",
-                "-release",
-                "-boundscheck=off"
-            ]
+        {
+            "name": "fiber-test",
+            "targetType": "executable",
+            "targetName": "fiber_test",
+            "mainSourceFile": "tests/integration/fiber_server_test.d",
+            "sourcePaths": ["source"],
+            "importPaths": ["source", "lib/wire/source", "lib/fastjsond/source"]
         }
-    }
+    ]
 }

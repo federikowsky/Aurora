@@ -26,6 +26,7 @@
 module aurora.app;
 
 import aurora.runtime.server;
+import aurora.runtime.hooks;
 import aurora.web.router;
 import aurora.web.context;
 import aurora.web.middleware;
@@ -44,6 +45,16 @@ class App
     private Router router;
     private MiddlewarePipeline pipeline;
     private ServerConfig config;
+    
+    // Hooks storage (applied to Server in listen())
+    private StartHook[] _startHooks;
+    private StopHook[] _stopHooks;
+    private ErrorHook[] _errorHooks;
+    private RequestHook[] _requestHooks;
+    private ResponseHook[] _responseHooks;
+    
+    // Exception handlers storage (applied to Server in listen())
+    private TypeErasedHandler[TypeInfo_Class] _exceptionHandlers;
     
     /**
      * Create new Aurora application
@@ -139,6 +150,85 @@ class App
     }
     
     // ========================================
+    // HOOKS API (V0.4 Extensibility)
+    // ========================================
+    
+    /// Register callback for server start event
+    App onStart(StartHook hook)
+    {
+        if (hook !is null)
+            _startHooks ~= hook;
+        return this;
+    }
+    
+    /// Register callback for server stop event
+    App onStop(StopHook hook)
+    {
+        if (hook !is null)
+            _stopHooks ~= hook;
+        return this;
+    }
+    
+    /// Register callback for request errors (for logging/metrics)
+    App onError(ErrorHook hook)
+    {
+        if (hook !is null)
+            _errorHooks ~= hook;
+        return this;
+    }
+    
+    /// Register callback before routing each request
+    App onRequest(RequestHook hook)
+    {
+        if (hook !is null)
+            _requestHooks ~= hook;
+        return this;
+    }
+    
+    /// Register callback after handler completion
+    App onResponse(ResponseHook hook)
+    {
+        if (hook !is null)
+            _responseHooks ~= hook;
+        return this;
+    }
+    
+    // ========================================
+    // EXCEPTION HANDLERS API (V0.4 Extensibility)
+    // ========================================
+    
+    /**
+     * Register a typed exception handler (FastAPI-style)
+     * 
+     * Example:
+     * ---
+     * app.addExceptionHandler!ValidationError((ref ctx, e) {
+     *     ctx.status(400).json(`{"error":"` ~ e.msg ~ `"}`);
+     * });
+     * ---
+     */
+    App addExceptionHandler(E : Exception)(ExceptionHandler!E handler)
+    {
+        if (handler is null)
+            throw new Exception("Exception handler cannot be null");
+        
+        // Wrap typed handler in type-erased form
+        TypeErasedHandler wrapped = (ref Context ctx, Exception e) @trusted {
+            if (auto typed = cast(E) e)
+                handler(ctx, typed);
+        };
+        
+        _exceptionHandlers[typeid(E)] = wrapped;
+        return this;
+    }
+    
+    /// Check if an exception handler is registered for a type
+    bool hasExceptionHandler(E : Exception)() const
+    {
+        return (typeid(E) in _exceptionHandlers) !is null;
+    }
+    
+    // ========================================
     // CONFIGURATION
     // ========================================
     
@@ -185,6 +275,22 @@ class App
     {
         // Create server with our router and pipeline
         server = new Server(router, pipeline, config);
+        
+        // Apply registered hooks to the server
+        foreach (hook; _startHooks)
+            server.hooks.onStart(hook);
+        foreach (hook; _stopHooks)
+            server.hooks.onStop(hook);
+        foreach (hook; _errorHooks)
+            server.hooks.onError(hook);
+        foreach (hook; _requestHooks)
+            server.hooks.onRequest(hook);
+        foreach (hook; _responseHooks)
+            server.hooks.onResponse(hook);
+        
+        // Apply registered exception handlers to the server
+        foreach (typeInfo, handler; _exceptionHandlers)
+            server.addExceptionHandlerDirect(typeInfo, handler);
         
         // Run (blocking)
         server.run();
