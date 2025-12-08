@@ -644,18 +644,21 @@ struct ConnectionTimeouts {
 > **V0.3 Implementation**: Connection management is handled directly in `aurora.runtime.server`.
 > There is NO separate `aurora.net.http` module - all logic is in `server.d`.
 
-#### 5.4.1 Connection Handling (V0.3)
+#### 5.4.1 Connection Handling (V0.6)
 
 **Implementation in server.d**:
 ```d
 // Connection handler (runs in fiber)
-void handleConnection(TCPConnection conn) {
-    scope(exit) conn.close();
+void processConnection(TCPConnection conn) {
+    // Use BufferPool for zero-GC under high concurrency
+    static BufferPool _pool;
+    if (_pool is null) _pool = new BufferPool();
     
-    ubyte[] buffer = new ubyte[4096];
+    ubyte[] buffer = _pool.acquire(BufferSize.MEDIUM);  // 16KB from pool
+    scope(exit) _pool.release(buffer);
     
     while (true) {  // Keep-alive loop
-        // Read request
+        // Read request (buffer reused across requests)
         auto bytesRead = conn.read(buffer);
         if (bytesRead == 0) break;  // Connection closed
         
@@ -673,6 +676,13 @@ void handleConnection(TCPConnection conn) {
     }
 }
 ```
+
+**BufferPool Benefits**:
+- Zero GC allocations per connection
+- 16KB buffers recycled from pool
+- Automatic release via `scope(exit)`
+- Metrics available: `pool.hitRatio()`, `pool.poolMisses()`
+
 
 **Connection Lifecycle**:
 1. `listenTCP()` accepts connection

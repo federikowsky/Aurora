@@ -204,10 +204,10 @@ Build: --build=release
 | Framework | Plaintext (req/s) | JSON (req/s) | Latency (avg) |
 |-----------|-------------------|--------------|---------------|
 | **vibe.d** | 123,556 | 126,247 | 1.08ms |
-| **Aurora** | 77,743 | 72,402 | 1.35ms |
+| **Aurora** | 75,087 | 73,967 | 1.69ms |
 | **hunt-http** | 47,590 | 52,151 | 2.07ms |
 
-> **Note**: Aurora prioritizes memory safety and enterprise features (rate limiting, circuit breaker, tracing, etc.) over raw throughput. vibe.d is a more minimal HTTP server optimized for pure performance.
+> **Note**: Aurora prioritizes memory safety and enterprise features (rate limiting, circuit breaker, tracing, etc.) over raw throughput. Uses BufferPool for zero-GC connection handling. vibe.d is a more minimal HTTP server optimized for pure performance.
 
 ### Key Tradeoffs
 
