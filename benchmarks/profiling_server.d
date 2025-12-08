@@ -50,55 +50,24 @@ void main()
     app.get("/stats", (ref Context ctx) {
         import std.format : format;
         auto stats = format(
-            `{"requests":%d,"connections":%d,"active":%d,"errors":%d}`,
+            `{"requests":%d,"connections":%d,"active":%d,"errors":%d,"pool_misses":%d}`,
             app.totalRequests(),
-            app.isRunning ? 1 : 0,  // simplified
+            app.isRunning ? 1 : 0,
             0,
-            0
+            0,
+            BufferPool.getGlobalPoolMisses()
         );
         ctx.json(stats);
     });
-    
-    // Start stats printer in background
-    import vibe.core.core : runTask;
-    runTask({
-        auto lastRequests = 0UL;
-        auto sw = StopWatch(AutoStart.yes);
-        
-        while (true) {
-            Thread.sleep(5.seconds);
-            
-            auto currentRequests = app.totalRequests();
-            auto elapsed = sw.peek.total!"msecs";
-            auto rps = elapsed > 0 ? (currentRequests - lastRequests) * 1000 / elapsed : 0;
-            
-            writeln();
-            writeln("═══════════════════════════════════════════════════════");
-            writefln("  Requests/sec (5s avg): %,d", rps);
-            writefln("  Total requests:        %,d", currentRequests);
-            
-            // BufferPool metrics
-            writeln("───────────────────────────────────────────────────────");
-            writefln("  Pool hits (global):    %,d", BufferPool.getGlobalPoolMisses());
-            writefln("  Pool fallbacks:        %,d", BufferPool.getGlobalFallbackAllocs());
-            writefln("  Pool full drops:       %,d", BufferPool.getGlobalPoolFullDrops());
-            
-            writeln("═══════════════════════════════════════════════════════");
-            
-            lastRequests = currentRequests;
-            sw.reset();
-            sw.start();
-        }
-    });
-    
+
     writeln();
     writeln("Endpoints:");
     writeln("  GET  /       - Plain text response");
     writeln("  GET  /json   - JSON response");
-    writeln("  GET  /stats  - Server statistics");
+    writeln("  GET  /stats  - Server statistics (JSON)");
     writeln();
     writefln("Starting server on http://localhost:%d", config.port);
-    writeln("Stats printed every 5 seconds");
+    writeln("Monitor with: watch -n1 'curl -s http://localhost:8080/stats | jq'");
     writeln("Use Ctrl+C to stop");
     writeln();
     

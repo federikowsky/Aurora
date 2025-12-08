@@ -45,8 +45,8 @@ void main()
     auto config = ServerConfig.defaults();
     config.port = 8080;  // Use 9000 to avoid conflicts
     config.numWorkers = 0;  // Auto-detect CPU cores
-    config.maxConnections = 50_000;
-    config.maxInFlightRequests = 10_000;
+    config.maxConnections = 0;  // 0 = disable backpressure (no overhead)
+    config.maxInFlightRequests = 0;  // 0 = disable in-flight limit
     
     auto app = new App(config);
     
