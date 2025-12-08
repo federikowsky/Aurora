@@ -54,5 +54,9 @@ Thumbs.db
 tests/realworld/multicore_server
 tests/realworld/singlecore_server
 build/
+lib/
 
 plan.md
+# Benchmark binaries
+benchmarks/aurora_benchmark
+benchmarks/comparison/*_benchmark

@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0] - 2025-12-06 "Production Release"
+
+**Aurora v1.0.0** - First stable release with API freeze guarantee.
+
+### Highlights
+- 🎉 **API Stability** - Public interfaces frozen, breaking changes only in major versions
+- 📚 **Complete Documentation** - [docs/API.md](docs/API.md) with full middleware reference
+- 🏢 **Enterprise Ready** - 10 production-grade middleware built-in
+- ✅ **38 test modules** - Comprehensive test coverage
+
+### Added
+- **`README.md`** - Complete project documentation with quick start guide
+- **`docs/API.md`** - Full API reference for all middleware and configuration
+
+### Enterprise Features (included since v0.6.0-v0.8.0)
+- Rate Limiting with token bucket algorithm
+- Circuit Breaker for failure isolation
+- Bulkhead pattern for concurrency limits
+- Load Shedding for graceful degradation
+- Kubernetes Health Probes (liveness, readiness, startup)
+- Memory Pressure monitoring with GC integration
+- Security Headers (OWASP, COOP, COEP, CORP)
+- CORS middleware
+- Request ID correlation
+- Distributed Tracing (OpenTelemetry/W3C Trace Context)
+
+### Notes
+- All middleware is opt-in (use only what you need)
+- Non-critical TODOs (SIMD, WebSocket fragmentation, request queuing) deferred to v1.x
+
+---
+
 ## [0.8.0] - 2025-12-06 "Security Hardening"
 
 Security header enhancements and production-ready authentication examples.
@@ -419,6 +451,7 @@ Initial release with core HTTP functionality.
 
 | Version | Date | Codename | Focus |
 |---------|------|----------|-------|
+| 1.0.0 | 2025-12-06 | Production Release | Stable API, Enterprise Ready |
 | 0.5.0 | 2025-12-04 | Solid Foundation | Production hardening |
 | 0.4.0 | 2025-12-02 | Extensibility | Hooks, CORS, Security |
 | 0.3.0 | 2025-11-28 | Performance | Memory, Metrics |

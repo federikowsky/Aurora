@@ -184,37 +184,18 @@ if (req.routing.messageComplete) {
 
 ### 2.3 Additional Dependencies (Selected Best-in-Class)
 
-> [!NOTE]
-> **V0.3 Status**: The following dependencies are **NOT currently integrated** but are planned for V0.4+.
-> They are documented here as design targets for future optimization.
-
-#### 2.3.1 Memory Allocator (V0.4+ Target)
-**Library**: `mimalloc` (Microsoft, version ≥ 2.1)  
-**Purpose**: High-performance allocator with thread-local caching  
-**Integration**: Linked as system allocator replacement
-
-**Rationale**: Superior fragmentation behavior, O(1) allocations, excellent multi-thread scaling
-
-**V0.3 Status**: Using D runtime's default allocator + custom pools (`aurora.mem.*`)
-
-#### 2.3.2 Hashing (V0.4+ Target)
-**Library**: `xxHash` (version ≥ 0.8)  
-**Purpose**: Non-cryptographic hash for routing, caching  
-**Binding**: Custom D binding
-
-**Rationale**: xxHash3 offers 30GB/s+ throughput, ideal for hot paths
-
-**V0.3 Status**: Using D standard library `hashOf()` for routing
-
-#### 2.3.3 Logging Backend
+#### 2.3.1 Logging Backend
 **Implementation**: `aurora.logging` module  
 **Purpose**: Structured logging with configurable output  
-**V0.3 Status**: ✅ Implemented (basic structured logging)
+**Status**: ✅ Implemented (basic structured logging)
 
-#### 2.3.4 Metrics
+#### 2.3.2 Metrics
 **Implementation**: `aurora.metrics` module  
 **Purpose**: /metrics endpoint with counters  
-**V0.3 Status**: ✅ Implemented (basic metrics counters)
+**Status**: ✅ Implemented (basic metrics counters)
+
+> [!NOTE]
+> For planned future dependencies (mimalloc, xxHash), see [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -266,34 +247,10 @@ if (req.routing.messageComplete) {
 - **aurora.runtime.worker**: Multi-worker pool for Linux/FreeBSD (SO_REUSEPORT)
 
 > [!NOTE]
-> **V0.3 Decision**: The following modules are NOT implemented because vibe-core provides them:
-> - `aurora.runtime.reactor` → use `vibe.core.core.runEventLoop()`
-> - `aurora.runtime.scheduler` → use `vibe.core.task`
-> - `aurora.runtime.fiber` → use `vibe.core.task.Task`
-> - `aurora.runtime.connection` → logic is in server.d `processConnection()`
-
-#### 3.2.2 Memory Modules (aurora.mem.*)
-
-- **aurora.mem.pool**: Buffer pools
-- **aurora.mem.object_pool**: Generic object pools
-- **aurora.mem.arena**: Arena allocator for temporary allocations
-
-#### 3.2.3 HTTP Protocol Modules (aurora.http.*)
-
-- **aurora.http.package**: HTTPRequest/HTTPResponse (Wire integration)
-- **aurora.http.util**: Status codes, response building utilities
-
-**Note**: 
-- TLS/HTTPS is handled by reverse proxy (nginx, Caddy)
-- HTTP/2, HTTP/3 are handled by reverse proxy
-- Aurora V0 focuses ONLY on HTTP/1.1
-
-> [!NOTE]
-> Package `aurora.net.*` is **reserved for future use** for additional network protocols:
-> - WebSocket support (aurora.net.websocket)
-> - Server-Sent Events (aurora.net.sse)
-> - Raw TCP/UDP abstractions (aurora.net.socket)
-> - Network utilities (aurora.net.util)
+> **Implementation Note**: The following modules are provided by vibe-core:
+> - Event loop → `vibe.core.core.runEventLoop()`
+> - Fiber scheduler → `vibe.core.task`
+> - Connection handling → logic in `server.d`
 
 #### 3.2.4 Web Framework Modules (aurora.web.*)
 
@@ -321,39 +278,16 @@ if (req.routing.messageComplete) {
 
 #### 3.2.6 Extension Modules (aurora.ext.*)
 
-> [!NOTE]
-> Package `aurora.ext.*` is **reserved for future use** for optional framework extensions.
-
-**Philosophy**: Aurora V0 focuses on CORE infrastructure only. All middleware is included in `aurora.web.middleware.*`.
-
-**V0 Status**: 
-- CORS middleware → `aurora.web.middleware.cors`
-- Security headers → `aurora.web.middleware.security`
-- Logger middleware → `aurora.web.middleware.logger`
-- Validation middleware → `aurora.web.middleware.validation`
-
-**Future Extensions** (aurora.ext.*):
-- Template engines (aurora.ext.templates)
-- Session management (aurora.ext.sessions)
-- File upload handling (aurora.ext.uploads)
-- Static file serving (aurora.ext.static)
-
 > [!IMPORTANT]
 > Business logic (JWT, rate limiting, auth) must be implemented by the user using external libraries.
+> For planned extensions, see [ROADMAP.md](ROADMAP.md).
 
-#### 3.2.7 Utility Modules
+#### 3.2.6 Utility Modules
 
-**V0.3 Implemented Modules** (top-level packages, not aurora.util.*):
+**Implemented Modules** (top-level packages):
 - **aurora.config**: Configuration system, ENV loading, ServerConfig
 - **aurora.logging**: Structured logging infrastructure
 - **aurora.metrics**: Metrics counters for observability
-
-**Note**: V0.3 uses top-level packages (`aurora.config`, `aurora.logging`, `aurora.metrics`) instead of a `aurora.util.*` namespace. This provides clearer imports and better discoverability.
-
-**V0.4+ Candidates** (not yet implemented):
-- Hash utilities (xxHash integration)
-- SIMD wrappers for manual vectorization
-- High-resolution timing utilities
 
 ---
 
@@ -525,189 +459,7 @@ server.run();
 - Both architectures are stable with minimal errors under extreme load
 
 > [!NOTE]
-> V0.4+ will implement NUMA affinity and thread pinning (section 5.1) for even better Linux performance on bare metal.
-
-### 5.1 Threading Model (V0.4+ Target)
-
-#### 5.1.1 Thread Architecture
-
-**Formula Worker Count**:
-```d
-numWorkers = max(1, numPhysicalCores - 1);
-// -1 per lasciare spazio ad acceptor thread + OS
-```
-
-**Thread Roles**:
-- **Worker Threads** (N): Handle HTTP requests, run fibers, event loops
-- **Acceptor Thread** (1): Dedicated accept() loop, distribuisce connessioni ai workers
-- **Auxiliary Threads** (0-2): Async logging flush, metrics aggregation (optional)
-
-**Rationale**: 
-- 1 worker per core fisico (non logico) per massimizzare cache L1/L2 hit
-- Hyperthreading aumenta contention su cache, meglio evitare
-- Acceptor thread separato evita contention su accept() mutex
-
-#### 5.1.2 Worker Thread Structure
-
-**Worker Struct** (`aurora.runtime.worker`):
-```d
-align(64) struct Worker {  // Cache-line aligned
-    // Hot data (first 64 bytes)
-    uint id;                        // Worker ID (0..N-1)
-    Thread thread;                  // OS thread handle
-    Reactor* reactor;               // Event loop (eventcore wrapper)
-    FiberScheduler* scheduler;      // Fiber ready queue
-    
-    // Memory management
-    MemoryPool* memoryPool;         // Thread-local buffer pool
-    ArenaAllocator* arena;          // Temporary allocations
-    
-    // NUMA affinity
-    uint numaNode;                  // NUMA node ID
-    cpu_set_t cpuMask;              // CPU affinity mask
-    
-    // Stats (separate cache line to avoid false sharing)
-    align(64) struct Stats {
-        ulong requestsProcessed;
-        ulong bytesReceived;
-        ulong bytesSent;
-        ulong fibersExecuted;
-        ulong eventsProcessed;
-    }
-    
-    // Cold data
-    string name;                    // "Worker-0", "Worker-1", ...
-    bool running;                   // Shutdown flag
-}
-```
-
-**Worker Lifecycle**:
-```d
-// 1. Initialization (main thread)
-void initWorkers(uint numWorkers) {
-    detectNUMATopology();
-    
-    for (uint i = 0; i < numWorkers; i++) {
-        worker = &workers[i];
-        worker.id = i;
-        worker.numaNode = i % numNUMANodes;
-        
-        // Allocate on correct NUMA node
-        worker.memoryPool = allocateOnNUMA(worker.numaNode);
-        worker.reactor = new Reactor();
-        worker.scheduler = new FiberScheduler();
-        
-        // Launch thread
-        worker.thread = new Thread(&workerMain, worker);
-        worker.thread.start();
-    }
-}
-
-// 2. Worker Main Loop (worker thread)
-void workerMain(Worker* worker) @nogc {
-    // Set thread affinity
-    setThreadAffinity(worker.cpuMask);
-    
-    // Worker run loop
-    while (worker.running) {
-        // Try get fiber from scheduler
-        fiber = worker.scheduler.dequeue();
-        
-        if (fiber) {
-            // Execute fiber until yield/complete
-            fiber.resume();
-            worker.stats.fibersExecuted++;
-        } else {
-            // No work, poll for events
-            worker.reactor.poll(timeout: 1.msecs);
-        }
-    }
-    
-    // Cleanup
-    worker.reactor.shutdown();
-    worker.memoryPool.flush();
-}
-
-// 3. Shutdown (main thread)
-void shutdownWorkers() {
-    foreach (worker; workers) {
-        worker.running = false;
-    }
-    
-    foreach (worker; workers) {
-        worker.thread.join();
-    }
-}
-```
-
-#### 5.1.3 Thread Affinity & NUMA
-
-**NUMA Topology Detection**:
-```d
-struct NUMATopology {
-    uint numNodes;                  // Number of NUMA nodes
-    uint coresPerNode;              // Cores per node
-    uint[] nodeForCore;             // nodeForCore[coreId] = numaNode
-}
-
-NUMATopology detectNUMATopology() {
-    version(linux) {
-        // Use libnuma or /sys/devices/system/node/
-        return detectNUMALinux();
-    } else {
-        // Fallback: assume single NUMA node
-        return NUMATopology(1, totalCores, ...);
-    }
-}
-```
-
-**Thread Pinning Strategy**:
-```d
-void setThreadAffinity(Worker* worker) {
-    version(linux) {
-        cpu_set_t cpuset;
-        CPU_ZERO(&cpuset);
-        
-        // Pin to specific core on NUMA node
-        uint coreId = worker.id % coresPerNode;
-        uint node = worker.numaNode;
-        uint globalCore = node * coresPerNode + coreId;
-        
-        CPU_SET(globalCore, &cpuset);
-        pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
-    }
-}
-```
-
-**Memory Affinity**:
-```d
-// Allocate memory on specific NUMA node
-void* allocateOnNUMA(uint numaNode, size_t size) {
-    version(linux) {
-        // Use numa_alloc_onnode()
-        return numa_alloc_onnode(size, numaNode);
-    } else {
-        // Fallback to regular malloc
-        return malloc(size);
-    }
-}
-```
-
-**Benefits**:
-- ✅ Workers access local memory (low latency)
-- ✅ No cross-NUMA traffic for hot paths
-- ✅ Cache locality preserved (worker → core → L1/L2 cache)
-- ✅ Predictable performance (no core migration penalties)
-
-**Config Option**:
-```d
-struct ServerConfig {
-    bool enableNUMAAffinity = true;   // Auto-detect and pin
-    bool enableCPUAffinity = true;    // Pin workers to cores
-    uint forcedNUMANode = uint.max;   // Override (for testing)
-}
-```
-
+> For future optimizations (NUMA affinity, thread pinning), see [ROADMAP.md](ROADMAP.md).
 
 ### 5.2 Fiber Scheduling
 
@@ -758,22 +510,12 @@ runWorkerTaskDist((pool) {
 - Request routing and middleware execution
 - Memory pool integration (`aurora.mem.*`)
 
-#### 5.2.3 Work Stealing (V0.4+ Target)
+#### 5.2.3 Current Limitation
 
-**V0.3**: NO work stealing - each worker has its own event loop and fiber pool
+No work stealing - each worker has its own event loop and fiber pool.
 
-**V0.4+ Target**: Custom work-stealing scheduler for better load balancing:
-```d
-// Future enhancement (not in V0.3)
-Fiber* tryStealFromOthers() {
-    for (otherWorker in workers) {
-        if (fiber = otherWorker.scheduler.steal()) {
-            return fiber;
-        }
-    }
-    return null;
-}
-```
+> [!NOTE]
+> For future work-stealing scheduler plans, see [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -5215,43 +4957,8 @@ Examples where manual SIMD might help:
 - Memory: < 50KB per connection
 - Linear scaling to available cores
 
-**NOT in V0** (future phases):
-- ❌ Dependency Injection
-- ❌ Database Integration (ORM, query builder)
-- ❌ OpenAPI/Swagger auto-generation
-- ❌ Authentication & Authorization (JWT, OAuth2, RBAC)
-- ❌ Background Jobs & Task Queue
-- ❌ Advanced CLI Tool (code generation, scaffolding)
-- ❌ GraphQL
-- ❌ Event System & Event Sourcing
-- ❌ API Versioning
-- ❌ Circuit Breaker & Resilience patterns
-- ❌ Multi-Tenancy
-- ❌ HTTP/2 (full implementation)
-
-### 20.2 Future Phases (Post-V0)
-
-#### Phase 1: Extended Features (v0.5)
-- Authentication & Authorization (JWT, OAuth2, RBAC)
-- Background Jobs system
-- Advanced CLI tooling
-- Testing utilities estese
-˜
-#### Phase 2: Enterprise Features (v1.0)
-- HTTP/2 full support
-- GraphQL support
-- Event Sourcing & CQRS
-- API Versioning
-- Multi-Tenancy
-
-#### Phase 3: Ecosystem (v1.5+)
-- Database ORM completo
-- Message Queue integrations
-- gRPC support
-- Cloud provider SDKs
-- Plugin system
-
----
+> [!NOTE]
+> For future features (DI, ORM, GraphQL, etc.), see [ROADMAP.md](ROADMAP.md).
 
 ## 21. WEBSOCKET INTEGRATION
 

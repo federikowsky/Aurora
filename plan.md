@@ -1,330 +1,472 @@
-# Aurora V0.5 - Solid Foundation Plan
+# Aurora v0.6 — Enterprise Hardening Plan
 
-**Data:** 3 Dicembre 2025  
-**Versione Target:** V0.5.0  
-**Stato:** 🚧 IN PROGRESS
+> **Goal**: Make Aurora production-ready for high-load enterprise deployments.  
+> **References**: Google SRE Book, AWS Builders Library, Kubernetes Best Practices
 
 ---
 
 ## Executive Summary
 
-**V0.5 "Solid Foundation"** si concentra su:
-1. ✅ **Hardening critico** - Graceful shutdown, RFC compliance, reliability tests
-2. 🚧 **Feature leggere** - Rate limiting, Request ID middleware
-3. ❌ **Skip tool esterni** - OWASP ZAP, fuzz testing → V0.6 o V1.0
+Aurora v0.5.0 is solid (540+ tests, 87% coverage) but lacks critical enterprise features:
 
-> **Obiettivo:** Rendere Aurora production-ready senza dipendenze esterne complesse.
+| Capability | v0.5 | v0.6 Target |
+|------------|:----:|:-----------:|
+| Connection Limits | ❌ | ✅ |
+| Backpressure | ❌ | ✅ |
+| Load Shedding | ❌ | ✅ |
+| K8s Health Probes | ❌ | ✅ |
+| Circuit Breaker | ❌ | ✅ |
+| OpenTelemetry | ❌ | ✅ |
+| WebSocket Backpressure | ❌ | ✅ |
 
----
-
-## Versioni Precedenti
-
-| Versione | Status | Contenuto |
-|----------|--------|-----------|
-| V0.3 | ✅ Done | Core HTTP server, multi-worker, routing, middleware, CORS, security headers |
-| V0.4 | ✅ Done | Server Hooks, Exception Handlers, App fluent API |
-| **V0.5** | 🚧 Current | Hardening + Feature leggere |
+**Total Effort**: ~38h across 3 phases
 
 ---
 
-## 1. Hardening Critico
+## Phase 1 — Critical (v0.6.0)
 
-### 1.1 Graceful Shutdown Test ✅ DONE
+### 1.1 Connection Limits & Backpressure
 
-**Priorità:** 🔴 ALTA  
-**Effort:** Medio (3-4h)  
-**File:** `tests/integration/graceful_shutdown_test.d`, `graceful_shutdown_test.py`
+**Problem**: Without limits, Aurora can exhaust memory and trigger cascading failures under load.
 
-**Completato:**
-- [x] Test API shutdown: `gracefulStop()`, `isShuttingDown()`
-- [x] Test state machine e counters
-- [x] Test `getRejectedDuringShutdown()` tracking
-- [x] Framework test Python per integration testing
+**Solution**: Add `maxConnections` with hysteresis (high/low water marks).
 
-### 1.2 RFC 7230 Compliance - Host Header
-
-**Priorità:** 🔴 ALTA  
-**Effort:** Basso (1-2h)  
-**File:** `tests/unit/http/http_test.d` (estendere)
-
-**Requisiti:**
-### 1.2 RFC 7230 Compliance - Host Header ✅ DONE
-
-**Priorità:** 🔴 ALTA  
-**Effort:** Basso (1-2h)  
-**File:** `tests/unit/http/http_test.d` (Test 67-76)
-
-**Completato:**
-- [x] Host header obbligatorio per HTTP/1.1
-- [x] Host header con porta esplicita
-- [x] IPv6 format (`[::1]:8080`)
-- [x] Multiple Host headers handling
-- [x] Case sensitivity
-- [x] HTTP/1.0 vs HTTP/1.1 requirements
-- [x] Absolute URI handling
-
-### 1.3 RFC 7230 Compliance - Content-Length ✅ DONE
-
-**Priorità:** 🔴 ALTA  
-**Effort:** Basso (1-2h)  
-**File:** `tests/unit/http/http_test.d` (Test 77-86)
-
-**Completato:**
-- [x] Duplicate Content-Length → handled consistently
-- [x] Negative Content-Length → handled
-- [x] Overflow Content-Length → handled
-- [x] Content-Length mismatch con body size
-- [x] Content-Length con chunked encoding (mutual exclusion)
-- [x] Zero Content-Length
-- [x] Leading zeros
-- [x] Transfer-Encoding precedence
-
-### 1.4 Fiber Crash Isolation Test
-
-**Priorità:** 🟡 MEDIA  
-**Effort:** Medio (2-3h)  
-**File:** `tests/integration/fiber_isolation_test.d`
-
-**Requisiti:**
-- [ ] Un crash in una fiber non deve crashare altre fiber
-- [ ] Un crash in una fiber non deve crashare il worker
-- [ ] Le risorse della fiber crashata devono essere rilasciate
-
-### 1.5 Connection Limit Test
-
-**Priorità:** 🟡 MEDIA  
-**Effort:** Medio (2-3h)  
-**File:** `tests/integration/connection_limit_test.py`
-
-**Requisiti:**
-- [ ] Testare comportamento con max_connections raggiunto
-- [ ] Verificare che nuove connessioni vengano rifiutate gracefully
-- [ ] Verificare recovery dopo che connessioni si liberano
-
----
-
-## 2. Feature Leggere
-
-### 2.1 Rate Limiting Middleware
-
-**Priorità:** 🟡 MEDIA  
-**Effort:** Medio (3-4h)  
-**File:** `source/aurora/web/middleware/ratelimit.d`
-
-**Design:**
 ```d
-/// Rate limiting middleware con token bucket algorithm
-struct RateLimitConfig {
-    uint requestsPerSecond = 100;
-    uint burstSize = 10;
-    Duration windowSize = 1.seconds;
-    
-    // Identificatore client (default: IP)
-    string function(ref Context) keyExtractor = (ref ctx) => ctx.request.remoteAddress;
-}
-
-/// Middleware factory
-auto rateLimiter(RateLimitConfig config = RateLimitConfig()) {
-    return (ref Context ctx, Handler next) {
-        string key = config.keyExtractor(ctx);
-        if (isRateLimited(key, config)) {
-            ctx.status(429).header("Retry-After", "1").send("Too Many Requests");
-            return;
-        }
-        next(ctx);
-    };
+struct ServerConfig {
+    uint maxConnections = 10_000;
+    float connectionHighWater = 0.8;   // Start rejecting at 80%
+    float connectionLowWater = 0.6;    // Resume at 60%
+    uint maxInFlightRequests = 1000;
+    OverloadBehavior overloadBehavior = OverloadBehavior.HTTP_503;
+    uint retryAfterSeconds = 5;
 }
 ```
 
-**Test Cases:**
-- [ ] Requests under limit pass through
-- [ ] Requests over limit get 429
-- [ ] Burst handling
-- [ ] Window reset
-- [ ] Per-client isolation
-- [ ] Retry-After header
+**Behavior**: Returns `503 Service Unavailable` with `Retry-After` header when overloaded.
 
-### 2.2 Request ID Middleware
+| Task | Effort | File |
+|------|--------|------|
+| Config fields | 30m | `config/server.d` |
+| Server state & atomics | 30m | `runtime/server.d` |
+| Connection limit check | 1h | `runtime/server.d` |
+| Hysteresis logic | 1h | `runtime/server.d` |
+| In-flight limiting | 1h | `runtime/server.d` |
+| 503 responses | 30m | `runtime/server.d` |
+| Metrics getters | 30m | `runtime/server.d` |
+| Unit tests (15+) | 2h | `tests/unit/runtime/backpressure_test.d` |
 
-**Priorità:** 🟢 BASSA  
-**Effort:** Basso (1-2h)  
-**File:** `source/aurora/web/middleware/requestid.d`
+**Subtotal**: 8h
 
-**Design:**
+---
+
+### 1.2 Kubernetes Health Probes
+
+**Problem**: K8s needs `/health/live`, `/health/ready`, `/health/startup` endpoints.
+
+**Solution**: `HealthMiddleware` with pluggable readiness checks.
+
 ```d
-/// Request ID middleware - aggiunge X-Request-ID a ogni request/response
-auto requestIdMiddleware(string headerName = "X-Request-ID") {
-    return (ref Context ctx, Handler next) {
-        // Usa ID esistente o genera nuovo
-        string requestId = ctx.request.header(headerName);
-        if (requestId.empty) {
-            requestId = generateUUID();
-        }
-        
-        // Salva nel context per logging
-        ctx.set("request_id", requestId);
-        
-        // Aggiungi alla response
-        ctx.header(headerName, requestId);
-        
-        next(ctx);
-    };
+struct HealthConfig {
+    string livenessPath = "/health/live";
+    string readinessPath = "/health/ready";
+    string startupPath = "/health/startup";
+    bool includeDetails = false;  // Security: disable in prod
+    ReadinessCheck[] readinessChecks;
+}
+
+// Usage
+app.use(new HealthMiddleware(app.server, healthConfig));
+```
+
+**Responses**:
+- **Liveness**: 200 if process can respond
+- **Readiness**: 200 if not shutting down, not overloaded, custom checks pass
+- **Startup**: 200 after `markStartupComplete()` called
+
+| Task | Effort | File |
+|------|--------|------|
+| HealthConfig struct | 20m | `web/middleware/health.d` |
+| HealthMiddleware | 1.5h | `web/middleware/health.d` |
+| `server.isInOverload()` | 15m | `runtime/server.d` |
+| Unit tests (10+) | 1h | `tests/unit/web/health_test.d` |
+
+**Subtotal**: 4h
+
+---
+
+### 1.3 Load Shedding
+
+**Problem**: Need HTTP-level protection beyond TCP connection limits.
+
+**Solution**: Probabilistic shedding with priority bypass.
+
+```d
+struct LoadShedConfig {
+    uint maxQueueDepth = 100;
+    float shedPercentage = 0.1;        // Shed 10% when overloaded
+    string priorityHeader = "X-Priority";
+    string[] priorityBypass = ["critical", "high"];
+    string[] criticalPaths = ["/health/live", "/health/ready"];
+}
+
+app.use(new LoadSheddingMiddleware(loadShedConfig));
+```
+
+| Task | Effort | File |
+|------|--------|------|
+| LoadShedConfig | 20m | `web/middleware/loadshed.d` |
+| LoadSheddingMiddleware | 2h | `web/middleware/loadshed.d` |
+| Unit tests (10+) | 1h | `tests/unit/web/loadshed_test.d` |
+
+**Subtotal**: 4h
+
+---
+
+## Phase 2 — Resilience (v0.6.1)
+
+### 2.1 Circuit Breaker
+
+**Problem**: Failing dependencies can cascade. Need automatic failure isolation.
+
+**Solution**: Three-state circuit (CLOSED → OPEN → HALF_OPEN).
+
+```d
+struct CircuitBreakerConfig {
+    uint failureThreshold = 5;
+    uint successThreshold = 3;
+    Duration resetTimeout = 30.seconds;
+}
+
+app.use(new CircuitBreakerMiddleware(cbConfig));
+```
+
+| Task | Effort | File |
+|------|--------|------|
+| CircuitBreaker class | 1.5h | `web/middleware/circuitbreaker.d` |
+| CircuitBreakerMiddleware | 1h | `web/middleware/circuitbreaker.d` |
+| Unit tests (15+) | 1.5h | `tests/unit/web/circuitbreaker_test.d` |
+
+**Subtotal**: 5h
+
+---
+
+### 2.2 OpenTelemetry Integration
+
+**Problem**: Need distributed tracing for observability.
+
+**Solution**: W3C Trace Context propagation with pluggable exporters.
+
+```d
+// Parses/generates: traceparent: 00-{traceId}-{spanId}-{flags}
+app.use(new TracingMiddleware("my-service", new ConsoleSpanExporter()));
+
+// Access in handlers
+auto traceId = ctx.getTraceId();
+```
+
+| Task | Effort | File |
+|------|--------|------|
+| TraceContext struct | 1h | `tracing.d` |
+| Span & SpanExporter | 1h | `tracing.d` |
+| TracingMiddleware | 1.5h | `tracing.d` |
+| ConsoleSpanExporter | 30m | `tracing.d` |
+| Unit tests (10+) | 1h | `tests/unit/tracing_test.d` |
+
+**Subtotal**: 6h
+
+---
+
+### 2.3 WebSocket Backpressure
+
+**Problem**: Slow WebSocket clients can cause unbounded buffer growth.
+
+**Solution**: Send buffer limits with slow client detection.
+
+```d
+struct WebSocketConfig {
+    size_t sendBufferHighWater = 1 * MB;
+    size_t sendBufferLowWater = 256 * KB;
+    Duration slowClientThreshold = 60.seconds;
+    SlowClientAction slowClientAction = SlowClientAction.DISCONNECT;
+}
+
+// Usage
+if (!ws.sendWithBackpressure(data)) {
+    log.warn("Dropped message for slow client");
 }
 ```
 
-**Test Cases:**
-- [ ] Genera UUID se non presente
-- [ ] Preserva ID esistente se presente in request
-- [ ] ID disponibile nel context
-- [ ] ID presente nella response
+| Task | Effort | File |
+|------|--------|------|
+| Config fields | 30m | `web/websocket.d` |
+| Buffer tracking | 1h | `web/websocket.d` |
+| Slow client detection | 1h | `web/websocket.d` |
+| `sendWithBackpressure()` | 1h | `web/websocket.d` |
+| Unit tests | 30m | `tests/unit/web/websocket_backpressure_test.d` |
 
-### 2.3 P99 Latency Tracking
-
-**Priorità:** 🟡 MEDIA  
-**Effort:** Medio (2-3h)  
-**File:** `source/aurora/metrics/package.d` (estendere)
-
-**Requisiti:**
-- [ ] Tracking p50, p90, p95, p99 latency
-- [ ] Histogram con bucket configurabili
-- [ ] Export Prometheus format
-- [ ] Reset periodico (es. ogni minuto)
+**Subtotal**: 4h
 
 ---
 
-## 3. Riabilitare Test Disabilitati
+## Phase 3 — Advanced (v0.7.0) ✅ COMPLETED
 
-### 3.1 Security Tests in middleware.disabled/
+### 3.1 Bulkhead Pattern ✅
 
-**Priorità:** 🔴 ALTA  
-**Effort:** Basso (30min-1h)  
-**Azione:** Spostare da `middleware.disabled/` a `middleware/`
+**Problem**: Isolate failures between endpoint groups.
 
-**File da riabilitare:**
-- [ ] `security_test.d` → già attivo? verificare
-- [ ] `validation_test.d`
-- [ ] `cors_test.d.disabled` → rimuovere .disabled
-- [ ] `logger_test.d.disabled` → rimuovere .disabled
+**Solution**: Per-route concurrency limits.
 
----
+```d
+auto apiBulkhead = new BulkheadMiddleware(BulkheadConfig(100, 50));
+auto adminBulkhead = new BulkheadMiddleware(BulkheadConfig(10, 5));
 
-## 4. Documentazione
+app.group("/api", r => r.use(apiBulkhead));
+app.group("/admin", r => r.use(adminBulkhead));
+```
 
-### 4.1 Aggiornare PRODUCTION_READINESS_AUDIT.md
-
-**Priorità:** 🟢 BASSA  
-**Effort:** Basso (1h)
-
-**Azioni:**
-- [ ] Aggiornare a V0.5
-- [ ] Aggiornare metriche (test cases, coverage)
-- [ ] Aggiornare gap analysis con test implementati
-- [ ] Aggiornare checklist pre-production
-
-### 4.2 Creare docs/CHANGELOG.md
-
-**Priorità:** 🟢 BASSA  
-**Effort:** Basso (30min)
+**Implemented**: 2025-12-05  
+**Tests**: 16 unit tests passing  
+**Module**: `aurora.web.middleware.bulkhead`
 
 ---
 
-## 5. Task Breakdown
+### 3.2 Memory Management ✅
 
-### Fase 1: Hardening Critico (Settimana 1)
+**Problem**: GC pressure under load.
 
-| # | Task | Effort | Status |
-|---|------|--------|--------|
-| 1.1 | Graceful shutdown test | 3-4h | ⬜ TODO |
-| 1.2 | RFC Host header tests | 1-2h | ⬜ TODO |
-| 1.3 | RFC Content-Length tests | 1-2h | ⬜ TODO |
-| 1.4 | Fiber crash isolation test | 2-3h | ⬜ TODO |
-| 1.5 | Connection limit test | 2-3h | ⬜ TODO |
-| 1.6 | Riabilitare middleware.disabled/* | 1h | ⬜ TODO |
+**Solution**: Memory monitoring with configurable pressure actions.
 
-### Fase 2: Feature Leggere (Settimana 2)
+```d
+struct MemoryConfig {
+    size_t maxHeapBytes = 512 * MB;
+    double highWaterRatio = 0.8;       // GC at 80%
+    double criticalWaterRatio = 0.95;  // Reject at 95%
+    PressureAction pressureAction = PressureAction.GC_COLLECT;
+}
+```
 
-| # | Task | Effort | Status |
-|---|------|--------|--------|
-| 2.1 | Rate limiting middleware | 3-4h | ⬜ TODO |
-| 2.2 | Request ID middleware | 1-2h | ⬜ TODO |
-| 2.3 | P99 latency tracking | 2-3h | ⬜ TODO |
-
-### Fase 3: Documentazione (Fine)
-
-| # | Task | Effort | Status |
-|---|------|--------|--------|
-| 3.1 | Aggiornare PRODUCTION_READINESS_AUDIT.md | 1h | ⬜ TODO |
-| 3.2 | Aggiornare TEST_REGISTRY.md | 30min | ⬜ TODO |
-| 3.3 | Creare CHANGELOG.md | 30min | ⬜ TODO |
+**Implemented**: 2025-12-05  
+**Tests**: 20 unit tests passing  
+**Module**: `aurora.mem.pressure`
 
 ---
 
-## 6. Criteri di Completamento V0.5
+## Effort Summary
 
-### Must Have (Release Blocker)
-- [ ] Graceful shutdown testato e funzionante
-- [ ] RFC 7230 compliance per Host e Content-Length
-- [ ] Tutti i test in middleware.disabled/ riabilitati e passanti
-- [ ] Rate limiting middleware implementato
+| Phase | Features | Status |
+|-------|----------|:------:|
+| **Phase 1** (v0.6.0) | Connection Limits, Health Probes, Load Shedding | ✅ Done |
+| **Phase 2** (v0.6.1) | Circuit Breaker, OpenTelemetry, WS Backpressure | ✅ Done |
+| **Phase 3** (v0.7.0) | Bulkhead, Memory Management | ✅ Done |
+| **Phase 4** (v0.8.0) | Security Hardening, Examples, Documentation | ✅ Done |
+| **Total** | 12 features, 200+ tests | **Complete** |
 
-### Should Have
-- [ ] Fiber crash isolation testato
-- [ ] Connection limit testato
-- [ ] Request ID middleware
-- [ ] P99 latency tracking
+---
+
+## Phase 4 — Security Hardening (v0.8.0) ✅ COMPLETED
+
+### 4.1 Request ID Middleware ✅
+
+**Problem**: Need request correlation for distributed tracing and debugging.
+
+**Solution**: Middleware that generates/preserves X-Request-ID header.
+
+```d
+import aurora.web.middleware.requestid;
+
+app.use(requestIdMiddleware());
+
+// In handlers
+auto requestId = getRequestId(ctx);
+```
+
+**Features**:
+- UUID v4 generation
+- Preserves existing X-Request-ID from clients
+- Configurable header name
+- Context storage for logging
+
+**Implemented**: Already existed  
+**Tests**: 25 unit tests passing  
+**Module**: `aurora.web.middleware.requestid`
+
+---
+
+### 4.2 Security Headers Enhancement ✅
+
+**Problem**: Missing Cross-Origin security headers.
+
+**Solution**: Added COOP, COEP, CORP headers to SecurityConfig.
+
+```d
+auto config = SecurityConfig();
+config.enableCOOP = true;  // Cross-Origin-Opener-Policy
+config.coopPolicy = "same-origin";
+config.enableCOEP = true;  // Cross-Origin-Embedder-Policy
+config.coepPolicy = "require-corp";
+config.enableCORP = true;  // Cross-Origin-Resource-Policy
+config.corpPolicy = "same-origin";
+```
+
+**New Headers**:
+- `Cross-Origin-Opener-Policy`: Controls browsing context isolation
+- `Cross-Origin-Embedder-Policy`: Controls cross-origin resource loading
+- `Cross-Origin-Resource-Policy`: Controls which origins can embed resources
+
+**Implemented**: 2025-12-06  
+**Tests**: 31 unit tests (10 new for Cross-Origin headers)  
+**Module**: `aurora.web.middleware.security`
+
+---
+
+### 4.3 Authentication Examples ✅
+
+Created comprehensive, documented authentication examples:
+
+| Example | Description |
+|---------|-------------|
+| `examples/auth_jwt.d` | JWT authentication with claims, validation, role-based access |
+| `examples/auth_apikey.d` | API Key authentication with scopes, expiration, rate limiting |
+
+**Philosophy**: Authentication is application-specific, not framework concern.
+
+---
+
+### 4.4 Security Documentation ✅
+
+Created comprehensive security guide: `docs/security-guide.md`
+
+**Topics Covered**:
+- Security headers configuration
+- JWT and API Key authentication patterns
+- Rate limiting best practices
+- Input validation
+- CORS configuration
+- HTTPS/TLS setup
+- Secrets management
+- Logging and auditing
+- Common vulnerabilities (XSS, CSRF, SQL injection, path traversal)
+- Production security checklist
+
+---
+
+## Test Requirements
+
+| Feature | Min Test Cases | Coverage Target |
+|---------|:--------------:|:---------------:|
+| Connection Limits | 15 | 90% |
+| Health Probes | 10 | 95% |
+| Load Shedding | 10 | 90% |
+| Circuit Breaker | 15 | 95% |
+| OpenTelemetry | 10 | 85% |
+| WebSocket Backpressure | 10 | 90% |
+
+**Total new tests**: 80+  
+**Target coverage**: 88% (up from 87%)
+
+---
+
+## Roadmap
+
+```
+v0.5.0 (complete)
+    │
+    ▼
+v0.6.0 — Enterprise Hardening ────────── ✅ DONE
+    • Connection limits & backpressure
+    • Kubernetes health probes
+    • Load shedding middleware
+    │
+    ▼
+v0.6.1 — Resilience Patterns ─────────── ✅ DONE
+    • Circuit breaker
+    • OpenTelemetry
+    • WebSocket backpressure
+    │
+    ▼
+v0.7.0 — Advanced Features ───────────── ✅ DONE
+    • Bulkhead pattern
+    • Memory management
+    • Rate limiter bucket cleanup
+    │
+    ▼
+v0.8.0 — Security Hardening ──────────── ✅ DONE
+    • Cross-Origin security headers
+    • Request ID middleware
+    • Authentication examples (JWT, API Key)
+    • Security documentation
+    │
+    ▼
+v1.0.0 — Production Release ──────────── ✅ IN PROGRESS
+    • API stability guarantee
+    • Full documentation (docs/API.md)
+    • Benchmark suite
+    • README update
+```
+
+---
+
+## Success Criteria — v0.6.0
+
+### Must Have ✅
+- [x] `maxConnections` config working
+- [x] Hysteresis (high/low water) implemented
+- [x] HTTP 503 + `Retry-After` on overload
+- [x] `/health/live` and `/health/ready` endpoints
+- [x] Load shedding with priority bypass
+- [x] 80+ new test cases
+- [x] Updated docs
+
+### Should Have ✅
+- [x] Metrics for all features
+- [x] `examples/production_server.d` — enterprise example
+- [ ] K8s deployment example
 
 ### Nice to Have
-- [ ] Documentazione completa aggiornata
-- [ ] CHANGELOG.md
+- [ ] Grafana dashboard template
+- [ ] Helm chart
 
 ---
 
-## 7. Metriche Target V0.5
+## Success Criteria — v1.0.0
 
-| Metrica | V0.4 | Target V0.5 |
-|---------|------|-------------|
-| Test cases | 480+ | 520+ |
-| Coverage media | 87% | 88%+ |
-| Moduli ≥80% coverage | 17 | 19 |
-| RFC compliance tests | Parziale | Completo |
-| Middleware disponibili | 5 | 7 |
+### Must Have
+- [ ] API freeze - public interfaces stable
+- [ ] docs/API.md - complete middleware documentation
+- [ ] Benchmark suite with req/s metrics
+- [ ] README.md updated for 1.0
+- [ ] CHANGELOG.md updated
+- [ ] All 38 test modules passing
 
----
+### Should Have
+- [ ] Performance comparison vs vibe.d
+- [ ] Quick start guide in README
 
-## 8. Dipendenze e Rischi
-
-### Dipendenze
-- Nessuna dipendenza esterna nuova
-- Tutti i test implementabili con tool esistenti
-
-### Rischi
-| Rischio | Probabilità | Impatto | Mitigazione |
-|---------|-------------|---------|-------------|
-| Graceful shutdown complesso | Media | Alto | Iniziare con test semplici |
-| Rate limiting performance | Bassa | Medio | Usare strutture dati efficienti |
-| Test disabilitati broken | Bassa | Basso | Fix incrementali |
+### Nice to Have (Post-1.0)
+- [ ] K8s deployment example
+- [ ] Grafana dashboard template
+- [ ] SIMD optimization (wire/types.d)
+- [ ] Request queuing (server.d)
+- [ ] WebSocket fragmentation (connection.d)
 
 ---
 
-## 9. Post V0.5 (Roadmap)
+## Known TODOs (Post-1.0 Optimization)
 
-### V0.6 - Advanced Testing
-- OWASP ZAP integration
-- Fuzz testing setup
-- Soak test 24h
-- Property-based testing
+> These are non-critical optimizations. They do not block v1.0.0 production readiness.
 
-### V0.7 - Advanced Features
-- WebSocket support
-- HTTP/2 (se richiesto)
-- Background jobs
+| Location | TODO | Priority | Status |
+|----------|------|----------|--------|
+| `server.d:979` | Request queuing for graceful degradation | Low | Future |
+| `connection.d:552` | WebSocket message fragmentation | Low | Future |
+| `wire/types.d:52` | SIMD case-insensitive comparison | Low | Future |
 
-### V1.0 - Production Release
-- Full OWASP compliance
-- Benchmark suite completa
-- Documentation completa
-- Security audit
+**Notes:**
+- All three are performance optimizations, not correctness issues
+- Current implementations work correctly, just not maximally optimized
+- Can be addressed in v1.1.0 or v1.2.0 based on user feedback
 
 ---
 
-*Piano creato il 26 Gennaio 2025*
+*Created: December 2024*
+*Updated: December 2025 - v1.0.0 release preparation*

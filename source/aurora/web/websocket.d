@@ -60,7 +60,7 @@ import aurora.web.context : Context;
 import aurora.web.upgrade : HijackedConnection;
 
 // Re-export commonly used types from Aurora-WebSocket
-public import websocket : 
+public import aurora_websocket : 
     MessageType, 
     CloseCode, 
     Message,
@@ -123,7 +123,7 @@ struct WebSocketConfig {
  * - NOT thread-safe. Use one WebSocket per thread/fiber.
  */
 class WebSocket {
-    import websocket : WebSocketConnection;
+    import aurora_websocket : WebSocketConnection;
     import std.typecons : Nullable;
 
     private WebSocketConnection _conn;
@@ -349,13 +349,13 @@ class WebSocket {
  * ---
  */
 WebSocket upgradeWebSocket(ref Context ctx, WebSocketConfig config = WebSocketConfig.init) @safe {
-    import websocket : 
+    import aurora_websocket : 
         validateUpgradeRequest, 
         buildUpgradeResponse,
         selectSubprotocol,
         WebSocketConnection;
-    import websocket.connection : ConnectionMode;
-    import WsConfigMod = websocket.connection;
+    import aurora_websocket.connection : ConnectionMode;
+    import WsConfigMod = aurora_websocket.connection;
 
     // Step 1: Check if this is a WebSocket upgrade request
     if (!ctx.isWebSocketUpgrade()) {
@@ -421,9 +421,9 @@ private WebSocket doUpgrade(
     string clientKey,
     string selectedProtocol
 ) @safe {
-    import websocket : buildUpgradeResponse, WebSocketConnection;
-    import websocket.connection : ConnectionMode;
-    import WsConfigMod = websocket.connection;
+    import aurora_websocket : buildUpgradeResponse, WebSocketConnection;
+    import aurora_websocket.connection : ConnectionMode;
+    import WsConfigMod = aurora_websocket.connection;
 
     // Hijack the connection
     try {
@@ -470,7 +470,7 @@ private WebSocket doUpgrade(
  * This is package-private - users interact with WebSocket class only.
  */
 package class WebSocketAdapter : IWebSocketStream {
-    import websocket.stream : IWebSocketStream, WebSocketStreamException;
+    import aurora_websocket.stream : IWebSocketStream, WebSocketStreamException;
 
     private HijackedConnection _hijacked;
     private ubyte[] _readBuffer;
@@ -553,4 +553,4 @@ package class WebSocketAdapter : IWebSocketStream {
 }
 
 // Re-import IWebSocketStream for the adapter
-private import websocket.stream : IWebSocketStream;
+private import aurora_websocket.stream : IWebSocketStream;
