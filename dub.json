@@ -1,36 +1,36 @@
 {
     "name": "aurora",
     "description": "High-performance HTTP/1.1 backend framework for D",
-    "version": "1.0.0",
     "authors": [
         "Federico Filippi"
     ],
     "copyright": "Copyright © 2025, Federico Filippi",
     "license": "MIT",
     "targetType": "library",
-    
     "dependencies": {
-        "vibe-core": "~>2.8.0",
+        "vibe-core": "~>2.8.6",
         "eventcore": "~>0.9.0",
         "mir-algorithm": "~>3.22.0",
+        "unit-threaded": "~>2.1.9",
+        "aurora-websocket": "~>1.0.0",
         "wire": "~>1.0.0",
-        "fastjsond": "~>1.0.0",
-        "aurora-websocket": "~>1.0.0"
+        "fastjsond": "~>1.0.0"
     },
-    
-    "libs-linux": ["stdc++"],
-    "libs-osx": ["c++"],
-    
-    "sourcePaths": ["source"],
-    "importPaths": ["source"],
-    
+    "libs-linux": [
+        "stdc++"
+    ],
+    "libs-osx": [
+        "c++"
+    ],
+    "importPaths": [
+        "source"
+    ],
     "buildTypes": {
         "release": {
             "dflags-ldc2": ["-O2", "-release", "-enable-inlining"],
             "dflags-dmd": ["-O", "-release", "-inline"]
         }
     },
-    
     "configurations": [
         {
             "name": "library",
@@ -42,16 +42,26 @@
             "dependencies": {
                 "unit-threaded": "~>2.1.0"
             },
-            "sourcePaths": ["source", "tests"],
-            "importPaths": ["source", "tests"],
+            "sourceFiles": [
+                "tests/runner.d"
+            ],
+            "importPaths": [
+                "source",
+                "tests"
+            ],
+            "sourcePaths": [
+                "source",
+                "tests"
+            ],
             "mainSourceFile": "tests/runner.d",
             "excludedSourceFiles": [
+                
                 "tests/realworld/*",
-                "tests/stress/*",
-                "tests/integration/test_server.d",
-                "tests/integration/fiber_server_test.d"
+                "tests/stress/*"
             ],
-            "dflags": ["-unittest"]
+            "dflags": [
+                "-unittest"
+            ]
         },
         {
             "name": "unittest-cov",
@@ -59,14 +69,70 @@
             "dependencies": {
                 "unit-threaded": "~>2.1.0"
             },
-            "sourcePaths": ["source", "tests"],
-            "importPaths": ["source", "tests"],
+            "sourceFiles": [
+                "tests/runner.d"
+            ],
+            "importPaths": [
+                "source",
+                "tests"
+            ],
+            "sourcePaths": [
+                "source",
+                "tests"
+            ],
             "mainSourceFile": "tests/runner.d",
             "excludedSourceFiles": [
+                
                 "tests/realworld/*",
                 "tests/stress/*"
             ],
-            "dflags": ["-unittest", "-cov"]
+            "dflags": [
+                "-unittest",
+                "-cov"
+            ]
+        },
+        {
+            "name": "unified-test",
+            "targetType": "executable",
+            "targetName": "unified_test",
+            "mainSourceFile": "examples/unified_test.d",
+            "sourcePaths": [
+                "source"
+            ],
+            "importPaths": [
+                "source",
+                "/Users/federicofilippi/Desktop/D/Wire/source"
+            ]
+        },
+        {
+            "name": "mt-test",
+            "targetType": "executable",
+            "targetName": "mt_test",
+            "mainSourceFile": "examples/mt_test.d",
+            "sourcePaths": [
+                "source"
+            ],
+            "importPaths": [
+                "source",
+                "/Users/federicofilippi/Desktop/D/Wire/source"
+            ]
+        },
+        {
+            "name": "test-server",
+            "targetType": "executable",
+            "targetName": "test_server",
+            "mainSourceFile": "tests/integration/test_server.d",
+            "sourceFiles": ["tests/integration/test_server.d"],
+            "excludedSourceFiles": ["source/**/*", "tests/**/*"],
+            "importPaths": ["source"]
+        },
+        {
+            "name": "fiber-test",
+            "targetType": "executable",
+            "targetName": "fiber_test",
+            "mainSourceFile": "tests/integration/fiber_server_test.d",
+            "sourcePaths": ["source"],
+            "importPaths": ["source", "lib/wire/source", "lib/fastjsond/source"]
         }
     ]
 }

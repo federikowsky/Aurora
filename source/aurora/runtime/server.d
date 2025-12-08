@@ -27,6 +27,7 @@ import aurora.web.router : Router, Match, PathParams;
 import aurora.web.context : Context;
 import aurora.web.middleware : MiddlewarePipeline;
 import aurora.http.util : getStatusText, getStatusLine, buildResponseInto;
+import aurora.mem.pool : BufferPool, BufferSize;
 import aurora.runtime.hooks : ServerHooks, TypeErasedHandler, StartHook, StopHook, 
                                ErrorHook, RequestHook, ResponseHook, ExceptionHandler;
 
@@ -1020,8 +1021,11 @@ final class Server
         auto maxBody = config.maxBodySize;
         auto maxRequests = config.maxRequestsPerConnection;
         
-        // Initial buffer for headers
-        ubyte[] buffer = new ubyte[8192];
+        // Initial buffer for headers (from pool for zero-GC)
+        static BufferPool _pool;
+        if (_pool is null) _pool = new BufferPool();
+        ubyte[] buffer = _pool.acquire(BufferSize.MEDIUM);  // 16KB from pool
+        scope(exit) _pool.release(buffer);
         uint requestCount = 0;
         
         // Keep-alive loop
@@ -1065,8 +1069,11 @@ final class Server
                         writer.writeError(431, "Request Header Fields Too Large");
                         return;
                     }
-                    auto newBuf = new ubyte[min(buffer.length * 2, maxHeader)];
+                    // Grow buffer using pool
+                    auto newSize = min(buffer.length * 2, maxHeader);
+                    auto newBuf = _pool.acquire(newSize);
                     newBuf[0..totalReceived] = buffer[0..totalReceived];
+                    _pool.release(buffer);  // Return old buffer to pool
                     buffer = newBuf;
                 }
                 
