@@ -13,8 +13,8 @@
         "mir-algorithm": "~>3.22.0",
         "unit-threaded": "~>2.1.9",
         "aurora-websocket": "~>1.0.0",
-        "wire": "~>1.0.0",
-        "fastjsond": "~>1.0.0"
+        "wire": "~>1.0.1",
+        "fastjsond": "~>1.0.2"
     },
     "libs-linux": [
         "stdc++"

@@ -117,3 +117,59 @@ unittest
     
     fromJSON!User(badJson).shouldThrow!ParseException;
 }
+
+// Test 7: Type mismatch - string field with non-string value (fastjsond v1.0.2 JsonException)
+@("tryString() returns error for non-string value")
+unittest
+{
+    import aurora.schema.json : parseRaw, deserializeValue;
+    
+    // JSON with name field that should be string but is number
+    string json = `{"name": 123}`;
+    auto doc = parseRaw(json);
+    
+    // Should throw ParseException when trying to deserialize as string
+    deserializeValue!string(doc.root["name"]).shouldThrow!ParseException;
+}
+
+// Test 8: Type mismatch - int field with non-int value
+@("tryInt() returns error for non-int value")
+unittest
+{
+    import aurora.schema.json : parseRaw, deserializeValue;
+    
+    // JSON with age field that should be int but is string
+    string json = `{"age": "not-a-number"}`;
+    auto doc = parseRaw(json);
+    
+    // Should throw ParseException when trying to deserialize as int
+    deserializeValue!int(doc.root["age"]).shouldThrow!ParseException;
+}
+
+// Test 9: Type mismatch - bool field with non-bool value
+@("tryBool() returns error for non-bool value")
+unittest
+{
+    import aurora.schema.json : parseRaw, deserializeValue;
+    
+    // JSON with active field that should be bool but is string
+    string json = `{"active": "yes"}`;
+    auto doc = parseRaw(json);
+    
+    // Should throw ParseException when trying to deserialize as bool
+    deserializeValue!bool(doc.root["active"]).shouldThrow!ParseException;
+}
+
+// Test 10: Type mismatch - nested struct with wrong type
+@("type mismatch in nested struct throws ParseException")
+unittest
+{
+    import aurora.schema.json : parseRaw, deserializeValue;
+    
+    // JSON with zipCode that should be int but is string
+    string json = `{"city": "NYC", "zipCode": "10001"}`;
+    auto doc = parseRaw(json);
+    
+    // Should throw ParseException when trying to deserialize zipCode as int
+    deserializeValue!int(doc.root["zipCode"]).shouldThrow!ParseException;
+}

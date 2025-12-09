@@ -156,6 +156,36 @@ config.maxBuckets = 100_000;               // Memory protection
 app.use(rateLimitMiddleware(config));
 ```
 
+### Compression
+
+Response compression middleware (gzip/deflate) to reduce bandwidth and improve latency.
+
+```d
+import aurora.web.middleware.compression;
+
+auto config = CompressionConfig();
+config.minSize = 1024;              // Only compress responses > 1KB
+config.compressionLevel = 6;        // Balance between speed and size (0-9)
+config.enableGzip = true;           // Enable gzip compression
+config.enableDeflate = true;        // Enable deflate compression
+config.preferredMethod = "gzip";    // Preferred if both supported
+
+app.use(compressionMiddleware(config));
+```
+
+**Features:**
+- Automatic compression based on `Accept-Encoding` header
+- Skips compression for already-compressed content types (images, videos, etc.)
+- Only compresses if result is smaller than original
+- Configurable minimum size threshold
+
+**Configuration:**
+- `minSize`: Minimum response size to compress (default: 1KB)
+- `compressionLevel`: 0-9, where 6 is balanced (default)
+- `skipContentTypes`: List of content types to skip (images, videos, etc.)
+- `enableGzip` / `enableDeflate`: Enable specific compression methods
+- `preferredMethod`: "gzip" or "deflate" when both supported
+
 ---
 
 ## HTTP Types

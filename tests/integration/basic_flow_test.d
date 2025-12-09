@@ -307,6 +307,7 @@ unittest
     auto pipeline = new MiddlewarePipeline();
     
     auto corsConfig = CORSConfig();
+    corsConfig.allowedOrigins = ["*"];  // Explicitly set for test (default is now [] for security)
     auto cors = new CORSMiddleware(corsConfig);
     
     auto securityConfig = SecurityConfig();

@@ -69,12 +69,13 @@ struct TestContext
 // ========================================
 
 // Test 1: Default CORS config
-@("default CORS config has wildcard origin")
+@("default CORS config has empty origins (secure default)")
 unittest
 {
     auto config = CORSConfig();
     
-    config.allowedOrigins.shouldEqual(["*"]);
+    // Default is empty array for security (requires explicit configuration)
+    config.allowedOrigins.length.shouldEqual(0);
     config.allowedMethods.shouldEqual(["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]);
     config.allowedHeaders.shouldEqual(["*"]);
     config.allowCredentials.shouldBeFalse;

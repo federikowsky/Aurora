@@ -182,6 +182,7 @@ All middleware is **opt-in**. Use only what you need.
 | **Health Probes** | K8s liveness/readiness | `aurora.web.middleware.health` |
 | **Security Headers** | OWASP headers | `aurora.web.middleware.security` |
 | **CORS** | Cross-origin requests | `aurora.web.middleware.cors` |
+| **Compression** | Gzip/deflate response compression | `aurora.web.middleware.compression` |
 | **Request ID** | Correlation tracking | `aurora.web.middleware.requestid` |
 | **Validation** | Schema validation | `aurora.web.middleware.validation` |
 | **Tracing** | OpenTelemetry compatible | `aurora.tracing` |

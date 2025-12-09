@@ -20,7 +20,7 @@ import aurora.http;
  */
 struct CORSConfig
 {
-    string[] allowedOrigins = ["*"];
+    string[] allowedOrigins = [];  // Empty by default - requires explicit configuration for security
     string[] allowedMethods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
     string[] allowedHeaders = ["*"];
     string[] exposedHeaders = [];

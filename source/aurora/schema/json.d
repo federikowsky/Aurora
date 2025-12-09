@@ -14,6 +14,7 @@ module aurora.schema.json;
 
 import aurora.schema.exceptions;
 import fastjsond;
+import fastjsond.types : JsonError, errorMessage;  // For error messages
 import std.traits;
 import std.array : Appender, appender;
 import std.conv : to;
@@ -260,38 +261,77 @@ T deserializeValue(T)(Value val) {
         return deserializeStruct!T(val);
     }
     else static if (is(T == string)) {
-        return val.getString().idup;
+        auto result = val.tryString();
+        if (!result.ok) {
+            throw new ParseException("Expected string, got different type: " ~ errorMessage(result.error).idup);
+        }
+        return result.value.idup;
     }
     else static if (is(T == const(char)[])) {
         // WARNING: Zero-copy, valid only while Document exists
-        return val.getString();
+        auto result = val.tryString();
+        if (!result.ok) {
+            throw new ParseException("Expected string, got different type: " ~ errorMessage(result.error).idup);
+        }
+        return result.value;
     }
     else static if (is(T == bool)) {
-        return val.getBool();
+        auto result = val.tryBool();
+        if (!result.ok) {
+            throw new ParseException("Expected boolean, got different type: " ~ errorMessage(result.error).idup);
+        }
+        return result.value;
     }
     else static if (is(T == int)) {
-        return cast(int) val.getInt();
+        auto result = val.tryInt();
+        if (!result.ok) {
+            throw new ParseException("Expected integer, got different type: " ~ errorMessage(result.error).idup);
+        }
+        return cast(int) result.value;
     }
     else static if (is(T == uint)) {
-        return cast(uint) val.getUint();
+        auto result = val.tryUint();
+        if (!result.ok) {
+            throw new ParseException(
+                "Expected unsigned integer, got different type: " ~ errorMessage(result.error).idup);
+        }
+        return cast(uint) result.value;
     }
     else static if (is(T == long)) {
-        return val.getInt();
+        auto result = val.tryInt();
+        if (!result.ok) {
+            throw new ParseException("Expected long integer, got different type: " ~ errorMessage(result.error).idup);
+        }
+        return result.value;
     }
     else static if (is(T == ulong)) {
-        return val.getUint();
+        auto result = val.tryUint();
+        if (!result.ok) {
+            throw new ParseException(
+                "Expected unsigned long integer, got different type: " ~ errorMessage(result.error).idup);
+        }
+        return result.value;
     }
     else static if (is(T == float)) {
-        return cast(float) val.getDouble();
+        auto result = val.tryDouble();
+        if (!result.ok) {
+            throw new ParseException("Expected float, got different type: " ~ errorMessage(result.error).idup);
+        }
+        return cast(float) result.value;
     }
     else static if (is(T == double)) {
-        return val.getDouble();
+        auto result = val.tryDouble();
+        if (!result.ok) {
+            throw new ParseException("Expected double, got different type: " ~ errorMessage(result.error).idup);
+        }
+        return result.value;
     }
     else static if (isArray!T && !is(T == string) && !is(T == const(char)[])) {
         alias E = typeof(T.init[0]);
         T result;
-        foreach (elem; val) {
-            result ~= deserializeValue!E(elem);
+        auto len = val.length;
+        for (size_t i = 0; i < len; i++) {
+            result ~= deserializeValue!E(val[i]);
         }
         return result;
     }
