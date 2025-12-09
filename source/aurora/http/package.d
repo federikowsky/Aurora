@@ -6,10 +6,13 @@
  * - HTTPResponse (response builder)
  * - Zero-copy parsing via Wire
  * - Fast (< 5μs parse time)
+ * - Production-grade URL encoding/decoding
+ * - Form data parsing
  * 
  * Usage:
  * ---
  * auto req = HTTPRequest.parse(data);
+ * string email = req.queryParam("email");  // URL-decoded
  * auto resp = HTTPResponse(200, "OK");
  * resp.setBody("Hello!");
  * ---
@@ -17,6 +20,8 @@
 module aurora.http;
 
 public import aurora.http.util;
+public import aurora.http.url;
+public import aurora.http.form;
 
 import wire;
 import std.string : toLower;
@@ -30,7 +35,7 @@ import std.array : appender;
  * - parse() uses Wire's @nogc parser ✅
  * - Accessor methods (method(), path(), etc.) allocate strings via .toString()
  * - This is acceptable for user-facing API (convenience over @nogc)
- * - Future: Add *View() methods if critical path requires @nogc
+ * - For @nogc access, use queryParamRaw() and similar *Raw() methods
  */
 struct HTTPRequest
 {
@@ -175,6 +180,159 @@ struct HTTPRequest
     bool hasError()
     {
         return !valid;
+    }
+    
+    // ════════════════════════════════════════════════════════════════════════
+    // QUERY PARAMETERS
+    // ════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Get URL-decoded query parameter.
+     *
+     * Uses Wire's @nogc parser for extraction, then applies
+     * URL decoding with security defaults (null byte rejection).
+     *
+     * Example:
+     * ---
+     * // URL: /search?q=hello%20world&page=2
+     * string q = request.queryParam("q");  // "hello world"
+     * ---
+     */
+    pragma(inline, true)
+    string queryParam(string name, string defaultValue = "")
+    {
+        import aurora.http.url : urlDecode, DecodeOptions;
+        
+        if (!valid) return defaultValue;
+        
+        auto view = wrapper.request.getQueryParam(name);
+        if (view.isNull) return defaultValue;
+        
+        return urlDecode(view.ptr[0 .. view.length], DecodeOptions.form());
+    }
+    
+    /**
+     * Get raw query parameter without URL decoding.
+     *
+     * Zero-copy via Wire. For performance-critical code.
+     * WARNING: Returns slice into request buffer - do not store.
+     */
+    pragma(inline, true)
+    const(char)[] queryParamRaw(const(char)[] name) @nogc nothrow @trusted
+    {
+        if (!valid) return null;
+        
+        auto view = wrapper.request.getQueryParam(name);
+        if (view.isNull) return null;
+        
+        return view.ptr[0 .. view.length];
+    }
+    
+    /**
+     * Check if query parameter exists.
+     */
+    pragma(inline, true)
+    bool hasQueryParam(const(char)[] name) @nogc nothrow @trusted
+    {
+        if (!valid) return false;
+        return wrapper.request.hasQueryParam(name);
+    }
+    
+    /**
+     * Get all values for a query parameter (multi-value).
+     *
+     * Example:
+     * ---
+     * // URL: /filter?tag=red&tag=blue
+     * string[] tags = request.queryParamAll("tag");  // ["red", "blue"]
+     * ---
+     */
+    string[] queryParamAll(string name)
+    {
+        import aurora.http.form : getFormFieldAll;
+        
+        auto raw = this.query();
+        if (raw.length == 0) return [];
+        
+        return getFormFieldAll(raw, name);
+    }
+    
+    // ════════════════════════════════════════════════════════════════════════
+    // FORM PARAMETERS
+    // ════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Get URL-decoded form field from body.
+     *
+     * Parses application/x-www-form-urlencoded body.
+     *
+     * Example:
+     * ---
+     * // POST body: email=test%40example.com
+     * string email = request.formParam("email");  // "test@example.com"
+     * ---
+     */
+    pragma(inline, true)
+    string formParam(string name, string defaultValue = "")
+    {
+        import aurora.http.form : getFormField;
+        
+        if (!valid) return defaultValue;
+        
+        auto bodyContent = this.body();
+        if (bodyContent.length == 0) return defaultValue;
+        
+        // Check content-type
+        auto contentType = this.getHeader("content-type");
+        if (contentType.length > 0 && !hasPrefix(contentType, "application/x-www-form-urlencoded"))
+            return defaultValue;
+        
+        return getFormField(bodyContent, name, defaultValue);
+    }
+    
+    /**
+     * Get all form field values (multi-value).
+     */
+    string[] formParamAll(string name)
+    {
+        import aurora.http.form : getFormFieldAll;
+        
+        if (!valid) return [];
+        
+        auto bodyContent = this.body();
+        if (bodyContent.length == 0) return [];
+        
+        auto contentType = this.getHeader("content-type");
+        if (contentType.length > 0 && !hasPrefix(contentType, "application/x-www-form-urlencoded"))
+            return [];
+        
+        return getFormFieldAll(bodyContent, name);
+    }
+    
+    /**
+     * Check if form field exists.
+     */
+    pragma(inline, true)
+    bool hasFormParam(string name)
+    {
+        import aurora.http.form : hasFormField;
+        
+        if (!valid) return false;
+        
+        auto bodyContent = this.body();
+        if (bodyContent.length == 0) return false;
+        
+        return hasFormField(bodyContent, name);
+    }
+    
+    // ════════════════════════════════════════════════════════════════════════
+    // PRIVATE HELPERS
+    // ════════════════════════════════════════════════════════════════════════
+    
+    pragma(inline, true)
+    private static bool hasPrefix(const(char)[] s, const(char)[] prefix) pure nothrow @nogc @safe
+    {
+        return s.length >= prefix.length && s[0 .. prefix.length] == prefix;
     }
 }
 

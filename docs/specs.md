@@ -2494,6 +2494,10 @@ struct HTTPRequest {
     StringView path() @nogc { return wireRequest.getPath(); }
     StringView header(string name) @nogc { return wireRequest.getHeader(name); }
     
+    // Query/Form parsing (see section 7.5)
+    string queryParam(string name, string defaultValue = "");
+    string formParam(string name, string defaultValue = "");
+    
     // Aurora-specific extensions
     PathParams params;     // Extracted by router
     Context* context;      // Request-scoped data
@@ -2524,6 +2528,149 @@ HTTP/1.1 persistent connections:
 
 > [!NOTE]
 > **HTTP/1.1 ONLY**: Aurora does NOT support HTTP/2, HTTP/3, WebSocket protocol. These are handled by reverse proxy (nginx, Caddy) if needed.
+
+### 7.5 Query String & Form Parsing
+
+**Package**: `aurora.http.url`, `aurora.http.form`
+
+Aurora provides production-grade URL encoding/decoding and form data parsing with:
+- RFC 3986 compliant percent-encoding
+- OWASP security best practices (null byte injection prevention)
+- LDC-optimized implementation with @nogc hot paths
+
+#### 7.5.1 HTTPRequest Query Parameter API
+
+```d
+struct HTTPRequest {
+    // ─── Query Parameters (from URL) ───
+    
+    /// Get URL-decoded query parameter
+    string queryParam(string name, string defaultValue = "");
+    
+    /// Get raw parameter without decoding (@nogc, zero-copy)
+    const(char)[] queryParamRaw(string name) @nogc;
+    
+    /// Check if query parameter exists
+    bool hasQueryParam(string name) @nogc;
+    
+    /// Get all values for multi-value parameter
+    string[] queryParamAll(string name);
+    
+    // ─── Form Fields (from body) ───
+    
+    /// Get URL-decoded form field
+    string formParam(string name, string defaultValue = "");
+    
+    /// Get all values for multi-value field
+    string[] formParamAll(string name);
+    
+    /// Check if form field exists
+    bool hasFormParam(string name);
+}
+```
+
+**Usage Example**:
+```d
+app.get("/search", (ctx) {
+    // URL: /search?q=hello%20world&tag=red&tag=blue
+    string query = ctx.request.queryParam("q");  // "hello world"
+    string[] tags = ctx.request.queryParamAll("tag");  // ["red", "blue"]
+    
+    if (ctx.request.hasQueryParam("debug")) {
+        // Enable debug mode
+    }
+});
+
+app.post("/login", (ctx) {
+    // POST body: email=test%40example.com&password=secret
+    string email = ctx.request.formParam("email");  // "test@example.com"
+    string password = ctx.request.formParam("password");
+});
+```
+
+#### 7.5.2 URL Encoding/Decoding API
+
+**Module**: `aurora.http.url`
+
+```d
+/// Decoding mode
+enum DecodeMode : ubyte {
+    URI,   // RFC 3986: + stays as +
+    Form,  // HTML form: + becomes space
+}
+
+/// Security options
+struct DecodeOptions {
+    DecodeMode mode = DecodeMode.Form;
+    bool rejectNullBytes = true;     // Security default
+    bool rejectControlChars = false;
+    bool validateUtf8 = false;
+    
+    static DecodeOptions form();   // Standard form options
+    static DecodeOptions uri();    // Standard URI options
+    static DecodeOptions strict(); // All security checks enabled
+}
+
+/// Lenient decode (returns empty on security violation)
+string urlDecode(const(char)[] input, DecodeOptions opts = DecodeOptions.init);
+
+/// Strict decode with error details
+DecodeResult urlDecodeStrict(const(char)[] input, DecodeOptions opts = DecodeOptions.init);
+
+/// Convenience functions
+string formDecode(const(char)[] input);  // + → space
+string uriDecode(const(char)[] input);   // + stays +
+
+/// Encoding
+string urlEncode(const(char)[] input);   // space → %20
+string formEncode(const(char)[] input);  // space → +
+```
+
+#### 7.5.3 Security Features
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| Null byte rejection | ✅ ON | Prevents `%00` path traversal attacks |
+| Control char filtering | ❌ OFF | Rejects `%00-%1F` (except TAB/LF/CR) |
+| UTF-8 validation | ❌ OFF | Validates decoded output is valid UTF-8 |
+| Single decode | Always | Never double-decodes (prevents `%2520` attacks) |
+
+**Security Example**:
+```d
+// Default: null bytes rejected
+assert(urlDecode("%00") == "");  // Empty, rejected
+
+// Strict mode with detailed errors
+auto result = urlDecodeStrict(userInput, DecodeOptions.strict());
+if (!result.ok) {
+    log.warn("Invalid input: ", result.error);
+    return ctx.badRequest("Invalid encoding");
+}
+```
+
+#### 7.5.4 RFC 3986 Compliance
+
+The implementation follows RFC 3986 specifications:
+- Percent-encoding uses uppercase hex (output)
+- Decoding accepts both upper/lowercase hex (input)
+- Unreserved characters: `A-Za-z0-9 - . _ ~`
+- UTF-8 encoded as individual bytes
+
+**Form vs URI Mode**:
+| Character | Form Mode | URI Mode |
+|-----------|-----------|----------|
+| `+` | → space | → `+` |
+| `%20` | → space | → space |
+| `%2B` | → `+` | → `+` |
+
+#### 7.5.5 Performance Characteristics
+
+- **Fast path**: No allocation when input has no encoding
+- **Pre-scan validation**: Validates before allocating
+- **Wire integration**: Uses Wire's @nogc parser for raw access
+- **LDC optimized**: `pragma(inline, true)` on hot paths
+
+**Complexity**: O(n) where n = input length
 
 ---
 

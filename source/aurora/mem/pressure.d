@@ -498,190 +498,6 @@ class MemoryMonitor
 }
 
 // ============================================================================
-// MEMORY MIDDLEWARE
-// ============================================================================
-
-import aurora.web.context : Context;
-
-alias NextFunction = void delegate();
-alias Middleware = void delegate(ref Context ctx, NextFunction next);
-
-/**
- * Memory Middleware
- *
- * Rejects requests when memory is in CRITICAL state.
- * Bypass paths allow health probes to continue working.
- */
-class MemoryMiddleware
-{
-    private
-    {
-        MemoryMonitor monitor;
-        string[] bypassPaths;
-        uint retryAfterSeconds;
-        bool checkOnRequest;
-    }
-    
-    /**
-     * Constructor
-     *
-     * Params:
-     *   monitor = Memory monitor instance
-     *   checkOnRequest = Whether to call monitor.check() on each request
-     */
-    this(MemoryMonitor monitor, bool checkOnRequest = false) @safe
-    {
-        this.monitor = monitor;
-        this.bypassPaths = monitor.configuration.bypassPaths.dup;
-        this.retryAfterSeconds = monitor.configuration.retryAfterSeconds;
-        this.checkOnRequest = checkOnRequest;
-    }
-    
-    /**
-     * Handle request
-     */
-    void handle(ref Context ctx, NextFunction next) @trusted
-    {
-        if (ctx.request is null)
-        {
-            next();
-            return;
-        }
-        
-        string path = ctx.request.path;
-        
-        // Check bypass paths
-        if (matchesBypassPath(path))
-        {
-            next();
-            return;
-        }
-        
-        // Optionally check memory on each request
-        if (checkOnRequest)
-        {
-            monitor.check();
-        }
-        
-        // Check current state
-        if (monitor.isCritical())
-        {
-            monitor.recordRejection();
-            sendCriticalResponse(ctx);
-            return;
-        }
-        
-        // Memory OK - proceed
-        next();
-    }
-    
-    /**
-     * Get as middleware delegate
-     */
-    Middleware middleware() @safe
-    {
-        return &this.handle;
-    }
-    
-    // ========================================================================
-    // PRIVATE METHODS
-    // ========================================================================
-    
-    private bool matchesBypassPath(string path) const @safe nothrow
-    {
-        foreach (pattern; bypassPaths)
-        {
-            if (globMatch(path, pattern))
-                return true;
-        }
-        return false;
-    }
-    
-    private static bool globMatch(string path, string pattern) @safe nothrow
-    {
-        if (pattern.length == 0)
-            return false;
-        
-        if (pattern[$ - 1] == '*')
-        {
-            string prefix = pattern[0 .. $ - 1];
-            return path.length >= prefix.length && path[0 .. prefix.length] == prefix;
-        }
-        else
-        {
-            return path == pattern;
-        }
-    }
-    
-    private void sendCriticalResponse(ref Context ctx) @trusted
-    {
-        import std.conv : to;
-        
-        ctx.status(503)
-           .header("Content-Type", "application/json")
-           .header("Retry-After", retryAfterSeconds.to!string)
-           .header("X-Memory-State", "critical")
-           .header("Cache-Control", "no-cache, no-store")
-           .send(`{"error":"Server under memory pressure","reason":"memory_critical"}`);
-    }
-}
-
-// ============================================================================
-// FACTORY FUNCTIONS
-// ============================================================================
-
-/**
- * Create memory middleware with new monitor.
- *
- * Example:
- * ---
- * app.use(memoryMiddleware(512 * 1024 * 1024));  // 512 MB limit
- * ---
- */
-Middleware memoryMiddleware(size_t maxHeapBytes)
-{
-    auto config = MemoryConfig();
-    config.maxHeapBytes = maxHeapBytes;
-    auto monitor = new MemoryMonitor(config);
-    auto mw = new MemoryMiddleware(monitor);
-    return mw.middleware;
-}
-
-/**
- * Create memory middleware with config.
- */
-Middleware memoryMiddleware(MemoryConfig config)
-{
-    auto monitor = new MemoryMonitor(config);
-    auto mw = new MemoryMiddleware(monitor);
-    return mw.middleware;
-}
-
-/**
- * Create memory middleware with existing monitor.
- *
- * Example:
- * ---
- * auto monitor = new MemoryMonitor(config);
- * monitor.onPressure = (state) { ... };
- * app.use(memoryMiddleware(monitor));
- * ---
- */
-Middleware memoryMiddleware(MemoryMonitor monitor, bool checkOnRequest = false)
-{
-    auto mw = new MemoryMiddleware(monitor, checkOnRequest);
-    return mw.middleware;
-}
-
-/**
- * Create memory middleware with instance access.
- */
-MemoryMiddleware createMemoryMiddleware(MemoryMonitor monitor, bool checkOnRequest = false)
-{
-    return new MemoryMiddleware(monitor, checkOnRequest);
-}
-
-// ============================================================================
 // UNIT TESTS
 // ============================================================================
 
@@ -858,28 +674,7 @@ unittest
     assert(stats.rejectedRequests == 2);
 }
 
-// Test 17: MemoryMiddleware creation
-@("memory middleware creation")
-unittest
-{
-    auto monitor = new MemoryMonitor();
-    auto mw = createMemoryMiddleware(monitor);
-    assert(mw !is null);
-}
-
-// Test 18: Factory functions
-@("memory factory functions")
-unittest
-{
-    auto mw1 = memoryMiddleware(256 * 1024 * 1024);
-    assert(mw1 !is null);
-    
-    auto config = MemoryConfig.withMaxMB(128);
-    auto mw2 = memoryMiddleware(config);
-    assert(mw2 !is null);
-}
-
-// Test 19: MemoryMonitor forceGC
+// Test 17: MemoryMonitor forceGC
 @("memory monitor forceGC increments counter")
 unittest
 {
@@ -892,7 +687,7 @@ unittest
     assert(afterStats.gcCollections == beforeStats.gcCollections + 1);
 }
 
-// Test 20: Config bypass paths
+// Test 18: Config bypass paths
 @("memory config bypass paths")
 unittest
 {
@@ -900,3 +695,4 @@ unittest
     assert(config.bypassPaths.length == 1);
     assert(config.bypassPaths[0] == "/health/*");
 }
+
