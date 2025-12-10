@@ -27,8 +27,12 @@
     ],
     "buildTypes": {
         "release": {
-            "dflags-ldc2": ["-O2", "-release", "-enable-inlining"],
+            "dflags-ldc2": ["-O3", "-release", "-boundscheck=off", "-mcpu=native", "-enable-inlining"],
             "dflags-dmd": ["-O", "-release", "-inline"]
+        },
+        "profiling": {
+            "dflags-ldc2": ["-O3", "-release", "-boundscheck=off", "-mcpu=native", "-enable-inlining", "-g", "-vgc"],
+            "dflags-dmd": ["-O", "-release", "-inline", "-g", "-vgc"]
         }
     },
     "configurations": [

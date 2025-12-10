@@ -1065,8 +1065,7 @@ final class Server
                     if (buffer.length >= maxHeader)
                     {
                         atomicOp!"+="(rejectedHeadersTooLarge, 1);
-                        auto writer = ResponseWriter(conn, &shuttingDown);
-                        writer.writeError(431, "Request Header Fields Too Large");
+                        sendErrorResponse(conn, 431, "Request Header Fields Too Large");
                         return;
                     }
                     // Grow buffer using pool
@@ -1141,8 +1140,7 @@ final class Server
             if (!headersComplete)
             {
                 atomicOp!"+="(rejectedHeadersTooLarge, 1);
-                auto writer = ResponseWriter(conn, &shuttingDown);
-                writer.writeError(431, "Request Header Fields Too Large");
+                sendErrorResponse(conn, 431, "Request Header Fields Too Large");
                 return;
             }
             
@@ -1154,15 +1152,13 @@ final class Server
             }
             catch (Exception)
             {
-                auto writer = ResponseWriter(conn, &shuttingDown);
-                writer.writeError(400, "Bad Request");
+                sendErrorResponse(conn, 400, "Bad Request");
                 break;
             }
-            
+
             if (request.hasError())
             {
-                auto writer = ResponseWriter(conn, &shuttingDown);
-                writer.writeError(400, "Bad Request");
+                sendErrorResponse(conn, 400, "Bad Request");
                 break;
             }
             
@@ -1176,8 +1172,7 @@ final class Server
                     if (contentLength > maxBody)
                     {
                         atomicOp!"+="(rejectedBodyTooLarge, 1);
-                        auto writer = ResponseWriter(conn, &shuttingDown);
-                        writer.writeError(413, "Payload Too Large");
+                        sendErrorResponse(conn, 413, "Payload Too Large");
                         return;
                     }
                 }
@@ -1192,150 +1187,272 @@ final class Server
             {
                 auto inFlight = atomicOp!"+="(currentInFlightRequests, 1);
                 scope(exit) atomicOp!"-="(currentInFlightRequests, 1);
-                
+
                 if (inFlight > config.maxInFlightRequests)
                 {
                     atomicOp!"+="(rejectedInFlight, 1);
-                    auto writer = ResponseWriter(conn, &shuttingDown);
-                    try
-                    {
-                        import std.format : format;
-                        immutable string body429 = `{"error":"Too many requests in flight"}`;
-                        auto response = format(
-                            "HTTP/1.1 503 Service Unavailable\r\n" ~
-                            "Content-Type: application/json\r\n" ~
-                            "Retry-After: %d\r\n" ~
-                            "Connection: close\r\n" ~
-                            "Content-Length: %d\r\n" ~
-                            "\r\n%s",
-                            config.retryAfterSeconds,
-                            body429.length,
-                            body429
-                        );
-                        conn.write(cast(const(ubyte)[])response);
-                    }
-                    catch (Exception) {}
+                    sendErrorResponse(conn, 503, "Too many requests in flight");
                     return;
                 }
             }
             
-            // Handle request
-            ubyte[] responseData;
+            // ═══════════════════════════════════════════════════════════════
+            // RESPONSE: Stack-local, fiber-safe, reset for each request
+            // ═══════════════════════════════════════════════════════════════
+            HTTPResponse response = HTTPResponse(200, "OK");
+
+            // Determine keep-alive BEFORE handling (based on request)
+            auto connHeader = request.getHeader("connection");
+            bool keepAlive = true;
+            if (connHeader == "close")
+                keepAlive = false;
+            else if (request.httpVersion() == "HTTP/1.0" && connHeader != "keep-alive")
+                keepAlive = false;
+
+            // Set up Context with pointers to our stack-local data
+            Context ctx;
+            ctx.request = &request;
+            ctx.response = &response;
+            ctx.setRawConnection(conn);  // For hijack support
+
+            // Handle request based on mode
             bool wasHijacked = false;
-            
+
             if (handler !is null)
             {
-                // Simple handler mode
+                // Simple handler mode (legacy API)
                 auto respBuffer = ResponseBuffer();
                 try
                 {
                     handler(&request, respBuffer);
-                    responseData = respBuffer.getData();
+                    auto data = respBuffer.getData();
+                    if (data.length > 0)
+                    {
+                        try { conn.write(data); }
+                        catch (Exception) { atomicOp!"+="(totalErrors, 1); return; }
+                    }
                 }
                 catch (Exception)
                 {
-                    responseData = cast(ubyte[])"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+                    sendErrorResponse(conn, 500, "Internal Server Error", false);
+                    return;
                 }
             }
             else if (router !is null)
             {
-                auto result = handleWithRouter(&request, conn);
-                responseData = result.data;
+                // Router mode - uses new unified architecture
+                auto result = handleWithRouter(ctx);
                 wasHijacked = result.hijacked;
+
+                // If hijacked, external handler owns the connection
+                if (wasHijacked)
+                    return;
+
+                // Send response through single I/O point
+                if (result.hasResponse)
+                {
+                    if (!sendHttpResponse(conn, result.response, keepAlive))
+                    {
+                        atomicOp!"+="(totalErrors, 1);
+                        return;
+                    }
+                }
             }
             else
             {
-                responseData = cast(ubyte[])"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
-            }
-            
-            // If hijacked, external handler owns the connection
-            if (wasHijacked)
+                // No handler configured
+                sendErrorResponse(conn, 500, "Internal Server Error", false);
                 return;
-            
-            // Send response
-            if (responseData.length > 0)
-            {
-                try
-                {
-                    conn.write(responseData);
-                }
-                catch (Exception)
-                {
-                    atomicOp!"+="(totalErrors, 1);
-                    return;
-                }
             }
-            
-            // Check keep-alive
-            auto connHeader = request.getHeader("connection");
-            if (connHeader == "close")
+
+            // Check if we should continue keep-alive loop
+            if (!keepAlive)
                 break;
-            if (request.httpVersion() == "HTTP/1.0" && connHeader != "keep-alive")
-                break;
-            
+
             // Update timeout for keep-alive
             conn.readTimeout = config.keepAliveTimeout;
         }
     }
     
-    /// Result from handleWithRouter - includes hijack state
+    /// Result from handleWithRouter - includes response pointer and hijack state
     private struct RouterResult
     {
-        ubyte[] data;
-        bool hijacked;
+        HTTPResponse* response;  // Points to stack-allocated response in processConnection()
+        bool hijacked;           // true if handler took over connection (WebSocket, etc.)
+
+        /// Check if there's a valid response to send
+        @property bool hasResponse() const @safe nothrow
+        {
+            return response !is null && !hijacked;
+        }
     }
-    
-    private RouterResult handleWithRouter(HTTPRequest* request, TCPConnection conn) @trusted
+
+    // ========================================
+    // SINGLE HTTP RESPONSE OUTPUT POINT
+    // ========================================
+
+    /**
+     * Send HTTP response to connection - the ONLY place where HTTP responses are written.
+     *
+     * This function:
+     * - Uses HTTPResponse.buildInto() which includes ALL headers (including custom headers)
+     * - Sets Connection header based on keepAlive
+     * - Uses 16KB stack buffer for most responses (zero allocations)
+     * - Falls back to heap only for responses > 16KB (rare)
+     *
+     * Params:
+     *   conn = TCP connection to write to
+     *   response = Response to send (must not be null)
+     *   keepAlive = Whether connection should be kept alive
+     *
+     * Returns: true on success, false on I/O error
+     */
+    private bool sendHttpResponse(TCPConnection conn, HTTPResponse* response, bool keepAlive) @trusted nothrow
     {
-        Context ctx;
-        ctx.request = request;
-        ctx.setRawConnection(conn);  // Pass connection for hijack support
-        
-        auto response = HTTPResponse(200, "OK");
-        ctx.response = &response;
-        
+        if (response is null)
+            return false;
+
+        try
+        {
+            // Set Connection header - no hasHeader() check, just set it
+            // This is faster than AA lookup and handles the common case
+            response.setHeader("Connection", keepAlive ? "keep-alive" : "close");
+
+            // ═══════════════════════════════════════════════════════════════
+            // HOT PATH: 20KB stack buffer covers 99%+ of responses
+            // No estimateSize() call - just try to build directly
+            // 20KB ensures 16KB body + headers fits in stack buffer
+            // ═══════════════════════════════════════════════════════════════
+            enum STACK_SIZE = 20 * 1024;  // 20KB
+            ubyte[STACK_SIZE] stackBuf = void;  // Uninitialized for speed
+
+            auto len = response.buildInto(stackBuf[]);
+            if (len > 0)
+            {
+                // Success - write directly from stack buffer
+                conn.write(stackBuf[0..len]);
+                return true;
+            }
+
+            // ═══════════════════════════════════════════════════════════════
+            // COLD PATH: Response > 16KB (rare)
+            // Only now do we call estimateSize() and heap allocate
+            // ═══════════════════════════════════════════════════════════════
+            auto estimatedSize = response.estimateSize();
+            auto heapBuf = new ubyte[estimatedSize + 1024];  // Extra margin
+
+            len = response.buildInto(heapBuf);
+            if (len > 0)
+            {
+                conn.write(heapBuf[0..len]);
+                return true;
+            }
+
+            // Failed to build response
+            return false;
+        }
+        catch (Exception)
+        {
+            // I/O error or other exception
+            return false;
+        }
+    }
+
+    /**
+     * Send an error response without needing a full HTTPResponse object.
+     * Used for early errors before HTTPResponse is set up.
+     */
+    private bool sendErrorResponse(TCPConnection conn, int statusCode, string message, bool keepAlive = false) @trusted nothrow
+    {
+        try
+        {
+            import std.format : format;
+            auto body_ = `{"error":"` ~ message ~ `"}`;
+            auto response = format(
+                "HTTP/1.1 %d %s\r\n" ~
+                "Content-Type: application/json\r\n" ~
+                "Content-Length: %d\r\n" ~
+                "Connection: %s\r\n" ~
+                "Server: Aurora/0.1\r\n" ~
+                "\r\n%s",
+                statusCode,
+                getStatusText(statusCode),
+                body_.length,
+                keepAlive ? "keep-alive" : "close",
+                body_
+            );
+            conn.write(cast(const(ubyte)[])response);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /**
+     * Handle request through router - ROUTING ONLY, NO I/O.
+     *
+     * This function:
+     * - Finds matching route
+     * - Executes middleware/handler
+     * - Populates ctx.response (which points to stack-allocated HTTPResponse in processConnection)
+     * - Does NOT do any I/O - that's sendHttpResponse's job
+     *
+     * Params:
+     *   ctx = Context with request pointer and response pointer already set
+     *
+     * Returns: RouterResult with response pointer and hijacked flag
+     */
+    private RouterResult handleWithRouter(ref Context ctx) @trusted
+    {
+        RouterResult result;
+        result.response = ctx.response;
+        result.hijacked = false;
+
         try
         {
             // Execute onRequest hooks
             _hooks.executeOnRequest(ctx);
-            
-            auto result = router.match(request.method(), request.path());
-            
-            if (result.found && result.handler !is null)
+
+            auto match = router.match(ctx.request.method(), ctx.request.path());
+
+            if (match.found && match.handler !is null)
             {
-                ctx.params = result.params;
-                
+                ctx.params = match.params;
+
                 // Execute with middleware pipeline if available
                 if (pipeline !is null && pipeline.length > 0)
                 {
-                    pipeline.execute(ctx, result.handler);
+                    pipeline.execute(ctx, match.handler);
                 }
                 else
                 {
-                    result.handler(ctx);
+                    match.handler(ctx);
                 }
             }
             else
             {
-                response.setStatus(404);
-                response.setHeader("Content-Type", "application/json");
-                response.setBody(`{"error":"Not Found"}`);
+                // 404 Not Found
+                ctx.response.setStatus(404);
+                ctx.response.setHeader("Content-Type", "application/json");
+                ctx.response.setBody(`{"error":"Not Found"}`);
             }
-            
+
             // Check if connection was hijacked
             if (ctx.isHijacked())
             {
                 // Connection is now owned by external handler
                 // Do NOT send response, do NOT close connection
-                return RouterResult(null, true);
+                result.hijacked = true;
+                result.response = null;
+                return result;
             }
-            
+
             // Execute onResponse hooks
             _hooks.executeOnResponse(ctx);
-            
-            auto respData = buildResponse(response.status, 
-                response.getContentType(), response.getBody());
-            return RouterResult(respData, false);
+
+            return result;
         }
         catch (Exception e)
         {
@@ -1343,48 +1460,29 @@ final class Server
             if (ctx.isHijacked())
             {
                 // Cannot send error response on hijacked connection
-                // Just log and return
                 try { logError("Exception after hijack: " ~ e.msg); } catch (Exception) {}
-                return RouterResult(null, true);
+                result.hijacked = true;
+                result.response = null;
+                return result;
             }
-            
+
             // Try to handle with registered exception handlers
             try
             {
                 handleException(ctx, e);
                 // Handler executed - return the response it set
                 _hooks.executeOnResponse(ctx);
-                auto respData = buildResponse(response.status, 
-                    response.getContentType(), response.getBody());
-                return RouterResult(respData, false);
+                return result;
             }
             catch (Exception)
             {
-                // No handler found or handler failed - return 500
-                return RouterResult(buildResponse(500, "application/json", 
-                    `{"error":"Internal Server Error"}`), false);
+                // No handler found or handler failed - set 500 error
+                ctx.response.setStatus(500);
+                ctx.response.setHeader("Content-Type", "application/json");
+                ctx.response.setBody(`{"error":"Internal Server Error"}`);
+                return result;
             }
         }
-    }
-    
-    private ubyte[] buildResponse(int status, string contentType, string body_) @trusted
-    {
-        enum STACK_SIZE = 4096;
-        
-        if (body_.length + 256 <= STACK_SIZE)
-        {
-            ubyte[STACK_SIZE] stackBuf;
-            auto len = buildResponseInto(stackBuf[], status, contentType, body_, true);
-            if (len > 0)
-                return stackBuf[0..len].dup;
-        }
-        
-        auto heapBuf = new ubyte[body_.length + 512];
-        auto len = buildResponseInto(heapBuf, status, contentType, body_, true);
-        if (len > 0)
-            return heapBuf[0..len];
-        
-        return cast(ubyte[])"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n".dup;
     }
 }
 

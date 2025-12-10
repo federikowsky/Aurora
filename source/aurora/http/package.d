@@ -353,10 +353,31 @@ struct HTTPResponse
     {
         statusCode = code;
         statusMessage = message;
-        
+
         // Set default headers
         headers["Server"] = "Aurora/0.1";
         headers["Connection"] = "keep-alive";
+    }
+
+    /**
+     * Reset response to default state for reuse.
+     * Used in server request loop to avoid re-initialization overhead.
+     */
+    void reset() @safe nothrow
+    {
+        statusCode = 200;
+        statusMessage = "OK";
+        bodyContent = null;
+
+        // Clear headers and set defaults
+        // Note: We can't use .clear() on AA in @safe nothrow, so we reassign
+        headers = null;
+        try
+        {
+            headers["Server"] = "Aurora/0.1";
+            headers["Connection"] = "keep-alive";
+        }
+        catch (Exception) {}  // AA assignment can throw, but shouldn't in practice
     }
     
     /**
@@ -365,6 +386,14 @@ struct HTTPResponse
     void setHeader(string name, string value)
     {
         headers[name] = value;
+    }
+
+    /**
+     * Check if a header exists (case-sensitive)
+     */
+    bool hasHeader(string name) const @safe nothrow
+    {
+        return (name in headers) !is null;
     }
     
     /**
