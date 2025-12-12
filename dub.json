@@ -32,7 +32,7 @@
         },
         "profiling": {
             "dflags-ldc2": ["-O3", "-release", "-boundscheck=off", "-mcpu=native", "-enable-inlining", "-g", "-vgc"],
-            "dflags-dmd": ["-O", "-release", "-inline", "-g", "-vgc"]
+            "dflags-dmd": ["-O", "-release", "-inline", "-g", "-vgc", "-profile=gc"]
         }
     },
     "configurations": [
