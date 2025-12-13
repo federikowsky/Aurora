@@ -60,5 +60,7 @@ plan.md
 # Benchmark binaries
 benchmarks/aurora_benchmark
 benchmarks/comparison/*_benchmark
+benchmarks/results/
+data/
 
 CLAUDE.md

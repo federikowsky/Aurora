@@ -155,9 +155,6 @@ immutable string STATUS_LINE_504 = "HTTP/1.1 504 Gateway Timeout\r\n";
 /**
  * Get pre-computed status line for common codes.
  * Returns null for uncommon codes (caller should format manually).
- * 
- * This is an optimization - for codes not in this list,
- * the caller uses getStatusText() to build the line dynamically.
  */
 string getStatusLine(int code) @safe @nogc nothrow pure
 {
@@ -194,6 +191,57 @@ string getStatusLine(int code) @safe @nogc nothrow pure
         default: return null;  // Caller will build dynamically using getStatusText()
     }
 }
+
+// ============================================================================
+// PRE-COMPUTED COMPLETE RESPONSES (Zero-Copy Hot Path)
+// ============================================================================
+
+/**
+ * Pre-computed complete HTTP responses for common error codes.
+ *
+ * These are fully formatted responses including:
+ * - Status line
+ * - Content-Type header
+ * - Content-Length header
+ * - Connection: close header
+ * - Server header
+ * - JSON body
+ *
+ * Usage: conn.write(RESPONSE_404_TEMPLATE);
+ */
+
+/// 404 Not Found - complete response
+immutable ubyte[] RESPONSE_404_TEMPLATE = cast(immutable ubyte[])(
+    "HTTP/1.1 404 Not Found\r\n" ~
+    "Content-Type: application/json\r\n" ~
+    "Content-Length: 23\r\n" ~
+    "Connection: close\r\n" ~
+    "Server: Aurora/0.3\r\n" ~
+    "\r\n" ~
+    `{"error":"Not Found"}`
+);
+
+/// 500 Internal Server Error - complete response
+immutable ubyte[] RESPONSE_500_TEMPLATE = cast(immutable ubyte[])(
+    "HTTP/1.1 500 Internal Server Error\r\n" ~
+    "Content-Type: application/json\r\n" ~
+    "Content-Length: 36\r\n" ~
+    "Connection: close\r\n" ~
+    "Server: Aurora/0.3\r\n" ~
+    "\r\n" ~
+    `{"error":"Internal Server Error"}`
+);
+
+/// 405 Method Not Allowed - complete response
+immutable ubyte[] RESPONSE_405_TEMPLATE = cast(immutable ubyte[])(
+    "HTTP/1.1 405 Method Not Allowed\r\n" ~
+    "Content-Type: application/json\r\n" ~
+    "Content-Length: 32\r\n" ~
+    "Connection: close\r\n" ~
+    "Server: Aurora/0.3\r\n" ~
+    "\r\n" ~
+    `{"error":"Method Not Allowed"}`
+);
 
 // ============================================================================
 // ZERO-ALLOCATION RESPONSE BUILDING

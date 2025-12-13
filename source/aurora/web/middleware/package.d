@@ -13,15 +13,80 @@ alias NextFunction = void delegate();
 alias Middleware = void delegate(ref Context ctx, NextFunction next);
 
 /**
+ * Stack-allocated middleware executor (zero allocations)
+ *
+ * This struct eliminates heap allocations while preserving the (ctx, next) API.
+ * It uses a member function delegate pattern with recursive execution.
+ *
+ * Technical details:
+ * - The struct is stack-allocated for each request (fiber stack)
+ * - &this.next is a member function delegate - NO heap allocation!
+ * - Middleware can call next() to execute the rest of the chain synchronously
+ * - When next() is called, it executes remaining middleware + handler, then returns
+ */
+private struct MiddlewareExecutor
+{
+    private Context* ctx;              // Pointer to context (ref cannot be field)
+    private Middleware[] middlewares;     // Middleware chain
+    private Handler finalHandler;         // Final handler after middleware
+    private uint currentIndex;            // Current middleware index
+
+    /**
+     * next() function passed to middleware
+     * Executes the rest of the chain synchronously, then returns
+     */
+    void next() @trusted
+    {
+        // Move to next middleware
+        currentIndex++;
+
+        // Execute rest of chain
+        continueExecution();
+    }
+
+    /**
+     * Continue execution from current index
+     * This is the actual execution logic
+     */
+    private void continueExecution() @trusted
+    {
+        // If we have more middleware, execute next one
+        if (currentIndex < middlewares.length)
+        {
+            // Call middleware with &this.next (member delegate, stack-only)
+            // The middleware can call next() which will recursively call continueExecution()
+            middlewares[currentIndex](*ctx, &this.next);
+        }
+        // If no more middleware and we have a handler, execute it
+        else if (finalHandler !is null)
+        {
+            finalHandler(*ctx);
+        }
+    }
+
+    /**
+     * Execute middleware chain
+     * This is the hot path - optimized for zero allocations
+     */
+    void execute() @trusted
+    {
+        currentIndex = 0;
+        continueExecution();
+    }
+}
+
+/**
  * MiddlewarePipeline - Chain of Responsibility middleware execution
  *
  * Executes middleware in order, with each middleware calling next()
  * to continue the chain. If next() is not called, the chain stops.
+ *
+ * Uses stack-allocated executor for zero-allocation execution
  */
 class MiddlewarePipeline
 {
     private Middleware[] middlewares;
-    
+
     /**
      * Add middleware to the pipeline
      */
@@ -29,9 +94,11 @@ class MiddlewarePipeline
     {
         middlewares ~= mw;
     }
-    
+
     /**
      * Execute the pipeline with a final handler
+     *
+     * Stack-allocates executor (no heap allocations)
      *
      * Params:
      *   ctx = Request context (passed by ref so middleware can modify it)
@@ -39,34 +106,12 @@ class MiddlewarePipeline
      */
     void execute(ref Context ctx, Handler finalHandler)
     {
-        executeChain(ctx, 0, finalHandler);
+        // Stack-allocated executor (fiber stack, zero heap)
+        // Pass address of ctx
+        auto executor = MiddlewareExecutor(&ctx, middlewares, finalHandler, 0);
+        executor.execute();
     }
-    
-    private void executeChain(ref Context ctx, uint index, Handler finalHandler)
-    {
-        if (index >= middlewares.length)
-        {
-            // Reached end of chain, execute final handler
-            if (finalHandler !is null)
-            {
-                finalHandler(ctx);
-            }
-            return;
-        }
-        
-        // Get current middleware
-        auto currentMiddleware = middlewares[index];
-        
-        // Define next() function that continues the chain
-        void next()
-        {
-            executeChain(ctx, index + 1, finalHandler);
-        }
-        
-        // Call middleware with next()
-        currentMiddleware(ctx, &next);
-    }
-    
+
     /**
      * Get middleware count
      */
@@ -74,7 +119,7 @@ class MiddlewarePipeline
     {
         return middlewares.length;
     }
-    
+
     /**
      * Clear all middleware
      */

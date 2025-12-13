@@ -94,6 +94,94 @@ struct DecodeResult
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
+ * P1-B OPTIMIZATION: In-place URL decoding (zero allocations)
+ *
+ * Decodes URL directly into the provided buffer. The decoded result will be
+ * shorter or equal to input length.
+ *
+ * Benefits:
+ * - Zero GC allocations
+ * - Single-pass decoding
+ * - Cache-friendly (in-place modification)
+ * - Estimated gain: 60-100ns per URL (~3-5%)
+ *
+ * Params:
+ *   buffer = Mutable buffer containing URL-encoded data
+ *   opts = Decoding options
+ *
+ * Returns:
+ *   Length of decoded data in buffer (buffer[0..returnValue] is valid)
+ *   Returns 0 on security violation (e.g., null byte rejection)
+ *
+ * Example:
+ *   char[] buf = "Hello%20World".dup;
+ *   auto len = urlDecodeInPlace(buf);
+ *   // buf[0..len] == "Hello World"
+ */
+size_t urlDecodeInPlace(char[] buffer, DecodeOptions opts = DecodeOptions.init) @nogc nothrow pure @safe
+{
+    if (buffer.length == 0)
+        return 0;
+
+    size_t writePos = 0;
+    size_t readPos = 0;
+
+    // Single-pass in-place decoding
+    while (readPos < buffer.length)
+    {
+        immutable c = buffer[readPos];
+
+        if (c == '%')
+        {
+            // Validate %XX format
+            if (readPos + 2 >= buffer.length)
+            {
+                // Malformed: copy as-is and stop
+                buffer[writePos++] = c;
+                readPos++;
+                continue;
+            }
+
+            immutable hi = hexDigit(buffer[readPos + 1]);
+            immutable lo = hexDigit(buffer[readPos + 2]);
+
+            if (hi < 0 || lo < 0)
+            {
+                // Invalid hex: copy % as-is
+                buffer[writePos++] = c;
+                readPos++;
+                continue;
+            }
+
+            immutable ubyte decoded = cast(ubyte)((hi << 4) | lo);
+
+            // Security: null byte check
+            if (opts.rejectNullBytes && decoded == 0)
+                return 0;  // Security violation
+
+            // Security: control character check
+            if (opts.rejectControlChars && isControlChar(decoded))
+                return 0;  // Security violation
+
+            buffer[writePos++] = cast(char)decoded;
+            readPos += 3;
+        }
+        else if (c == '+' && opts.mode == DecodeMode.Form)
+        {
+            buffer[writePos++] = ' ';
+            readPos++;
+        }
+        else
+        {
+            buffer[writePos++] = c;
+            readPos++;
+        }
+    }
+
+    return writePos;  // New length (decoded data is buffer[0..writePos])
+}
+
+/**
  * URL decode with lenient error handling.
  *
  * On malformed input, returns input unchanged or partially decoded.

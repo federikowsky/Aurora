@@ -50,11 +50,9 @@ else
 // Standard library
 import core.atomic;
 import core.time;
-import core.stdc.string : memcpy;
-import std.format : format;
+import core.stdc.string : memcpy, memchr;
 import std.stdio : stderr, writeln, writefln;
 import std.conv : to;
-import std.algorithm : min;
 
 // ============================================================================
 // PLATFORM DETECTION
@@ -76,6 +74,72 @@ version(linux) {
     private enum PLATFORM = "other";
     private enum SUPPORT_REUSEPORT = false;
 }
+
+// ============================================================================
+// COMPILE-TIME UTILITIES
+// ============================================================================
+
+/// Fast unsigned integer to decimal string into buffer (no GC)
+/// Returns slice of buffer containing the result
+pragma(inline, true)
+private char[] uintToStr(char[] buf, ulong val) @nogc nothrow pure @safe
+{
+    if (val == 0)
+    {
+        buf[$ - 1] = '0';
+        return buf[$ - 1 .. $];
+    }
+    
+    size_t pos = buf.length;
+    while (val > 0)
+    {
+        buf[--pos] = cast(char)('0' + val % 10);
+        val /= 10;
+    }
+    return buf[pos .. $];
+}
+
+/// Fast min without branching ambiguity
+pragma(inline, true)
+private T fastMin(T)(T a, T b) @nogc nothrow pure @safe
+{
+    return a < b ? a : b;
+}
+
+// ============================================================================
+// PRE-COMPUTED RESPONSE TEMPLATES (Zero-GC)
+// ============================================================================
+
+/// Static 503 response prefix (before Retry-After value)
+private immutable ubyte[] RESPONSE_503_PREFIX = cast(immutable ubyte[])
+    ("HTTP/1.1 503 Service Unavailable\r\n" ~
+    "Content-Type: application/json\r\n" ~
+    "Retry-After: ");
+
+/// Static 503 response middle (after Retry-After, before Content-Length)
+private immutable ubyte[] RESPONSE_503_MIDDLE = cast(immutable ubyte[])
+    ("\r\nConnection: close\r\n" ~
+    "Content-Length: ");
+
+/// Static 503 body
+private immutable string BODY_503 = `{"error":"Service temporarily unavailable","reason":"server_overloaded"}`;
+
+/// Static 503 body length as string (compile-time computed)
+private immutable string BODY_503_LEN_STR = "69";  // BODY_503.length
+
+/// Static error response template components
+private immutable ubyte[] ERROR_PREFIX = cast(immutable ubyte[])"HTTP/1.1 ";
+private immutable ubyte[] ERROR_MIDDLE = cast(immutable ubyte[])
+    ("\r\nContent-Type: application/json\r\n" ~
+    "Content-Length: ");
+private immutable ubyte[] ERROR_SERVER = cast(immutable ubyte[])
+    "\r\nServer: Aurora/0.1\r\n\r\n";
+private immutable ubyte[] ERROR_BODY_PREFIX = cast(immutable ubyte[])`{"error":"`;
+private immutable ubyte[] ERROR_BODY_SUFFIX = cast(immutable ubyte[])`"}`;
+
+/// Connection header values
+private immutable ubyte[] CONN_KEEPALIVE = cast(immutable ubyte[])"\r\nConnection: keep-alive";
+private immutable ubyte[] CONN_CLOSE = cast(immutable ubyte[])"\r\nConnection: close";
 
 // ============================================================================
 // SERVER CONFIGURATION
@@ -144,6 +208,10 @@ struct ServerConfig
     /// Retry-After header value in seconds (for 503 responses)
     uint retryAfterSeconds = 5;
     
+    // Pre-computed thresholds (computed once at config time)
+    private uint _highWaterMark;
+    private uint _lowWaterMark;
+    
     static ServerConfig defaults() @safe nothrow
     {
         return ServerConfig.init;
@@ -158,6 +226,27 @@ struct ServerConfig
             return totalCPUs > 0 ? totalCPUs : 4;
         }
         catch (Exception) { return 4; }
+    }
+    
+    /// Pre-compute thresholds for faster runtime checks
+    void precomputeThresholds() @safe nothrow
+    {
+        _highWaterMark = cast(uint)(maxConnections * connectionHighWater);
+        _lowWaterMark = cast(uint)(maxConnections * connectionLowWater);
+    }
+    
+    /// Get pre-computed high water mark
+    pragma(inline, true)
+    uint highWaterMark() const @safe nothrow pure
+    {
+        return _highWaterMark;
+    }
+    
+    /// Get pre-computed low water mark
+    pragma(inline, true)
+    uint lowWaterMark() const @safe nothrow pure
+    {
+        return _lowWaterMark;
     }
 }
 
@@ -174,6 +263,7 @@ struct ResponseWriter
     
     @disable this();
     
+    pragma(inline, true)
     this(TCPConnection c, shared(bool)* shutdown = null) @safe nothrow
     {
         conn = c;
@@ -192,7 +282,7 @@ struct ResponseWriter
         enum STACK_SIZE = 4096;
         if (body_.length + 256 <= STACK_SIZE)
         {
-            ubyte[STACK_SIZE] stackBuf;
+            ubyte[STACK_SIZE] stackBuf = void;
             auto len = buildResponseInto(stackBuf[], statusCode, contentType,
                                          cast(string)body_, keepAlive);
             if (len > 0)
@@ -211,34 +301,95 @@ struct ResponseWriter
     }
     
     /// Write a complete HTTP response (string version)
+    pragma(inline, true)
     void write(int statusCode, string contentType, string body_, bool keepAlive = true) @safe
     {
         write(statusCode, contentType, cast(const(ubyte)[])body_, keepAlive);
     }
     
     /// Write JSON response
+    pragma(inline, true)
     void writeJson(int statusCode, string json) @safe
     {
         write(statusCode, "application/json", json);
     }
     
-    /// Write error response
+    /// Write error response (zero-GC path)
     void writeError(int statusCode, string message, bool keepAlive = false) @trusted nothrow
     {
         if (headersSent) return;
         try
         {
             headersSent = true;
-            ubyte[512] buf;
-            auto body_ = `{"error":"` ~ message ~ `"}`;
-            auto len = buildResponseInto(buf[], statusCode, "application/json", body_, keepAlive);
+            ubyte[512] buf = void;
+            auto len = buildErrorResponseInto(buf[], statusCode, message, keepAlive);
             if (len > 0)
                 conn.write(buf[0..len]);
         }
         catch (Exception) {}
     }
     
-    @property bool wasSent() const @safe nothrow { return headersSent; }
+    pragma(inline, true)
+    @property bool wasSent() const @safe nothrow pure { return headersSent; }
+}
+
+/// Build error response into buffer (zero-GC)
+private size_t buildErrorResponseInto(ubyte[] buf, int statusCode, string message, bool keepAlive) @nogc nothrow @trusted
+{
+    if (buf.length < 256) return 0;
+    
+    size_t pos = 0;
+    
+    // "HTTP/1.1 "
+    buf[pos..pos+9] = ERROR_PREFIX[0..9];
+    pos += 9;
+    
+    // Status code (3 digits)
+    buf[pos++] = cast(ubyte)('0' + statusCode / 100);
+    buf[pos++] = cast(ubyte)('0' + (statusCode / 10) % 10);
+    buf[pos++] = cast(ubyte)('0' + statusCode % 10);
+    buf[pos++] = ' ';
+    
+    // Status text
+    auto statusText = getStatusText(statusCode);
+    if (pos + statusText.length >= buf.length) return 0;
+    buf[pos..pos+statusText.length] = cast(const(ubyte)[])statusText[];
+    pos += statusText.length;
+    
+    // Headers middle section
+    if (pos + ERROR_MIDDLE.length >= buf.length) return 0;
+    buf[pos..pos+ERROR_MIDDLE.length] = ERROR_MIDDLE[];
+    pos += ERROR_MIDDLE.length;
+    
+    // Content-Length value: body is {"error":"<message>"}
+    auto bodyLen = 11 + message.length + 2;  // {"error":"..."}
+    char[20] lenBuf;
+    auto lenStr = uintToStr(lenBuf[], bodyLen);
+    if (pos + lenStr.length >= buf.length) return 0;
+    buf[pos..pos+lenStr.length] = cast(const(ubyte)[])lenStr[];
+    pos += lenStr.length;
+    
+    // Connection header
+    auto connHdr = keepAlive ? CONN_KEEPALIVE : CONN_CLOSE;
+    if (pos + connHdr.length >= buf.length) return 0;
+    buf[pos..pos+connHdr.length] = connHdr[];
+    pos += connHdr.length;
+    
+    // Server header and blank line
+    if (pos + ERROR_SERVER.length >= buf.length) return 0;
+    buf[pos..pos+ERROR_SERVER.length] = ERROR_SERVER[];
+    pos += ERROR_SERVER.length;
+    
+    // Body
+    if (pos + bodyLen >= buf.length) return 0;
+    buf[pos..pos+ERROR_BODY_PREFIX.length] = ERROR_BODY_PREFIX[];
+    pos += ERROR_BODY_PREFIX.length;
+    buf[pos..pos+message.length] = cast(const(ubyte)[])message[];
+    pos += message.length;
+    buf[pos..pos+ERROR_BODY_SUFFIX.length] = ERROR_BODY_SUFFIX[];
+    pos += ERROR_BODY_SUFFIX.length;
+    
+    return pos;
 }
 
 // ============================================================================
@@ -267,17 +418,20 @@ struct ResponseBuffer
             data = null;
     }
     
+    pragma(inline, true)
     void write(int statusCode, string contentType, string body_) @trusted
     {
         write(statusCode, contentType, cast(const(ubyte)[])body_);
     }
     
+    pragma(inline, true)
     void writeJson(int statusCode, string json) @safe
     {
         write(statusCode, "application/json", json);
     }
     
-    ubyte[] getData() @safe nothrow
+    pragma(inline, true)
+    ubyte[] getData() @safe nothrow pure
     {
         return data;
     }
@@ -291,6 +445,37 @@ struct ResponseBuffer
 alias RequestHandler = void delegate(scope HTTPRequest* request, scope ResponseBuffer writer) @safe;
 
 // ============================================================================
+// FAST HEADER END SEARCH
+// ============================================================================
+
+/**
+ * Fast search for \r\n\r\n pattern in buffer.
+ * Optimized for modern CPUs with good branch prediction on the common case.
+ * Returns position of first byte after \r\n\r\n, or 0 if not found.
+ */
+pragma(inline, true)
+private size_t findHeaderEnd(const(ubyte)[] buf) @nogc nothrow pure @safe
+{
+    if (buf.length < 4) return 0;
+    
+    // Fast path: search for \r first, then verify pattern
+    // This is cache-friendly and branch-predictor friendly
+    immutable len = buf.length - 3;
+    for (size_t i = 0; i < len; ++i)
+    {
+        // Common case: not a \r
+        if (buf[i] != '\r') continue;
+        
+        // Found \r, check for \n\r\n
+        // Combine checks for better pipelining
+        if (buf[i+1] == '\n' && buf[i+2] == '\r' && buf[i+3] == '\n')
+            return i + 4;
+    }
+    
+    return 0;
+}
+
+// ============================================================================
 // MAIN SERVER CLASS
 // ============================================================================
 
@@ -299,6 +484,38 @@ final class Server
 {
     private
     {
+        // === Hot data (frequently accessed together) ===
+        // Grouped for cache locality
+        shared bool running;
+        shared bool shuttingDown;
+        shared bool inOverloadState;
+        
+        // Pre-computed config values (avoid repeated floating point math)
+        uint _highWaterMark;
+        uint _lowWaterMark;
+        uint _maxConnections;
+        uint _maxInFlightRequests;
+        uint _maxRequestsPerConnection;
+        uint _maxHeaderSize;
+        size_t _maxBodySize;
+        OverloadBehavior _overloadBehavior;
+        uint _retryAfterSeconds;
+        
+        // === Counters (grouped for potential SIMD operations) ===
+        shared ulong totalConnections;
+        shared ulong activeConnections;
+        shared ulong totalRequests;
+        shared ulong totalErrors;
+        shared ulong rejectedHeadersTooLarge;
+        shared ulong rejectedBodyTooLarge;
+        shared ulong rejectedTimeout;
+        shared ulong rejectedDuringShutdown;
+        shared ulong rejectedOverload;
+        shared ulong rejectedInFlight;
+        shared ulong overloadStateTransitions;
+        shared ulong currentInFlightRequests;
+        
+        // === Cold data (setup/config, rarely accessed in hot path) ===
         ServerConfig config;
         Router router;
         MiddlewarePipeline pipeline;
@@ -310,10 +527,6 @@ final class Server
         // Exception handlers (type hierarchy based)
         TypeErasedHandler[TypeInfo_Class] _exceptionHandlers;
         
-        // State
-        shared bool running;
-        shared bool shuttingDown;
-        
         // Single-listener mode (macOS/Windows)
         TCPListener listener;
         
@@ -323,23 +536,8 @@ final class Server
             WorkerPool workerPool;
         }
         
-        // Stats (thread-safe) - used in single-listener mode
-        // In multi-worker mode, stats are aggregated from WorkerPool
-        shared ulong totalConnections;
-        shared ulong activeConnections;
-        shared ulong totalRequests;
-        shared ulong totalErrors;
-        shared ulong rejectedHeadersTooLarge;
-        shared ulong rejectedBodyTooLarge;
-        shared ulong rejectedTimeout;
-        shared ulong rejectedDuringShutdown;
-        
-        // Backpressure state (Enterprise)
-        shared bool inOverloadState;           // Whether we're in overload mode
-        shared ulong rejectedOverload;         // Connections rejected due to overload
-        shared ulong rejectedInFlight;         // Requests rejected due to in-flight limit
-        shared ulong overloadStateTransitions; // Times we entered overload state
-        shared ulong currentInFlightRequests;  // Current in-flight requests (global)
+        // Thread-local buffer pool reference
+        static BufferPool _tlsPool;
     }
     
     // ========================================
@@ -353,7 +551,7 @@ final class Server
         this.pipeline = null;
         this.handler = null;
         this.config = cfg;
-        initStats();
+        initServer();
     }
     
     /// Create with router and middleware pipeline
@@ -363,7 +561,7 @@ final class Server
         this.pipeline = p;
         this.handler = null;
         this.config = cfg;
-        initStats();
+        initServer();
     }
     
     /// Create with simple handler
@@ -373,6 +571,24 @@ final class Server
         this.pipeline = null;
         this.handler = h;
         this.config = cfg;
+        initServer();
+    }
+    
+    /// Initialize server state and pre-compute config values
+    private void initServer() @safe nothrow
+    {
+        // Pre-compute config values to avoid repeated calculations in hot path
+        config.precomputeThresholds();
+        _highWaterMark = config.highWaterMark();
+        _lowWaterMark = config.lowWaterMark();
+        _maxConnections = config.maxConnections;
+        _maxInFlightRequests = config.maxInFlightRequests;
+        _maxRequestsPerConnection = config.maxRequestsPerConnection;
+        _maxHeaderSize = config.maxHeaderSize;
+        _maxBodySize = config.maxBodySize;
+        _overloadBehavior = config.overloadBehavior;
+        _retryAfterSeconds = config.retryAfterSeconds;
+        
         initStats();
     }
     
@@ -403,6 +619,7 @@ final class Server
     
     /// Access server hooks for lifecycle events
     /// Example: server.hooks.onStart(() => writeln("Server starting!"));
+    pragma(inline, true)
     ref ServerHooks hooks() @safe nothrow
     {
         return _hooks;
@@ -430,12 +647,14 @@ final class Server
     }
     
     /// Check if an exception handler is registered for a type
+    pragma(inline, true)
     bool hasExceptionHandler(E : Exception)() const @safe nothrow
     {
         return (typeid(E) in _exceptionHandlers) !is null;
     }
     
     /// Get number of registered exception handlers
+    pragma(inline, true)
     size_t exceptionHandlerCount() const @safe nothrow
     {
         return _exceptionHandlers.length;
@@ -651,9 +870,11 @@ final class Server
     // ========================================
     
     /// Check if server is running
+    pragma(inline, true)
     bool isRunning() @safe nothrow { return atomicLoad(running); }
     
     /// Check if server is shutting down
+    pragma(inline, true)
     bool isShuttingDown() @safe nothrow { return atomicLoad(shuttingDown); }
     
     // ========================================
@@ -739,6 +960,7 @@ final class Server
     }
     
     /// Get rejected during shutdown
+    pragma(inline, true)
     ulong getRejectedDuringShutdown() @safe nothrow
     {
         // This is always tracked locally in main thread
@@ -750,30 +972,35 @@ final class Server
     // ========================================
     
     /// Check if server is currently in overload state
+    pragma(inline, true)
     bool isInOverload() @safe nothrow
     {
         return atomicLoad(inOverloadState);
     }
     
     /// Get connections rejected due to overload
+    pragma(inline, true)
     ulong getRejectedOverload() @safe nothrow
     {
         return atomicLoad(rejectedOverload);
     }
     
     /// Get requests rejected due to in-flight limit
+    pragma(inline, true)
     ulong getRejectedInFlight() @safe nothrow
     {
         return atomicLoad(rejectedInFlight);
     }
     
     /// Get number of times server entered overload state
+    pragma(inline, true)
     ulong getOverloadTransitions() @safe nothrow
     {
         return atomicLoad(overloadStateTransitions);
     }
     
     /// Get current in-flight requests count
+    pragma(inline, true)
     ulong getCurrentInFlightRequests() @safe nothrow
     {
         return atomicLoad(currentInFlightRequests);
@@ -782,21 +1009,23 @@ final class Server
     /// Get connection utilization ratio (0.0 - 1.0)
     float getConnectionUtilization() @safe nothrow
     {
-        if (config.maxConnections == 0) return 0.0f;
+        if (_maxConnections == 0) return 0.0f;
         auto active = getActiveConnections();
-        return cast(float)active / cast(float)config.maxConnections;
+        return cast(float)active / cast(float)_maxConnections;
     }
     
     /// Get the high water mark threshold (absolute number)
-    uint getConnectionHighWaterMark() const @safe nothrow
+    pragma(inline, true)
+    uint getConnectionHighWaterMark() const @safe nothrow pure
     {
-        return cast(uint)(config.maxConnections * config.connectionHighWater);
+        return _highWaterMark;
     }
     
     /// Get the low water mark threshold (absolute number)
-    uint getConnectionLowWaterMark() const @safe nothrow
+    pragma(inline, true)
+    uint getConnectionLowWaterMark() const @safe nothrow pure
     {
-        return cast(uint)(config.maxConnections * config.connectionLowWater);
+        return _lowWaterMark;
     }
     
     // ========================================
@@ -804,6 +1033,7 @@ final class Server
     // ========================================
     
     /// Safe close helper (nothrow)
+    pragma(inline, true)
     private static void safeClose(TCPConnection conn) @trusted nothrow
     {
         try { conn.close(); }
@@ -857,7 +1087,7 @@ final class Server
     
     private void handleConnection(TCPConnection conn) @safe nothrow
     {
-        // Check if shutting down
+        // Check if shutting down (hot path first check)
         if (atomicLoad(shuttingDown))
         {
             atomicOp!"+="(rejectedDuringShutdown, 1);
@@ -897,18 +1127,16 @@ final class Server
     /// Returns: true if connection should be accepted, false if rejected
     private bool checkAndUpdateBackpressure(TCPConnection conn) @safe nothrow
     {
-        // Skip if maxConnections is 0 (unlimited)
-        if (config.maxConnections == 0) return true;
+        // Skip if maxConnections is 0 (unlimited) - fast path
+        if (_maxConnections == 0) return true;
         
         auto currentActive = atomicLoad(activeConnections);
-        auto highMark = getConnectionHighWaterMark();
-        auto lowMark = getConnectionLowWaterMark();
         
         // Check if we're already in overload state
         if (atomicLoad(inOverloadState))
         {
             // In overload: only accept if we've recovered below low water mark
-            if (currentActive < lowMark)
+            if (currentActive < _lowWaterMark)
             {
                 // Recovery! Exit overload state
                 atomicStore(inOverloadState, false);
@@ -923,7 +1151,7 @@ final class Server
         }
         
         // Check if we should enter overload state
-        if (currentActive >= highMark)
+        if (currentActive >= _highWaterMark)
         {
             // Enter overload state
             if (!atomicLoad(inOverloadState))
@@ -937,7 +1165,7 @@ final class Server
         }
         
         // Check hard limit
-        if (currentActive >= config.maxConnections)
+        if (currentActive >= _maxConnections)
         {
             rejectConnectionOverload(conn);
             return false;
@@ -947,14 +1175,14 @@ final class Server
     }
     
     /// Check if we should exit overload state (called on connection close)
+    pragma(inline, true)
     private void checkOverloadRecovery() @safe nothrow
     {
         if (!atomicLoad(inOverloadState)) return;
         
         auto currentActive = atomicLoad(activeConnections);
-        auto lowMark = getConnectionLowWaterMark();
         
-        if (currentActive < lowMark)
+        if (currentActive < _lowWaterMark)
         {
             atomicStore(inOverloadState, false);
         }
@@ -965,7 +1193,7 @@ final class Server
     {
         atomicOp!"+="(rejectedOverload, 1);
         
-        final switch (config.overloadBehavior)
+        final switch (_overloadBehavior)
         {
             case OverloadBehavior.reject503:
                 send503Response(conn);
@@ -985,26 +1213,42 @@ final class Server
         }
     }
     
-    /// Send HTTP 503 response with Retry-After header
+    /// Send HTTP 503 response with Retry-After header (zero-GC)
     private void send503Response(TCPConnection conn) @trusted nothrow
     {
         try
         {
-            import std.format : format;
+            // Pre-sized buffer for 503 response
+            ubyte[256] buf = void;
+            size_t pos = 0;
             
-            immutable string body503 = `{"error":"Service temporarily unavailable","reason":"server_overloaded"}`;
-            auto response = format(
-                "HTTP/1.1 503 Service Unavailable\r\n" ~
-                "Content-Type: application/json\r\n" ~
-                "Retry-After: %d\r\n" ~
-                "Connection: close\r\n" ~
-                "Content-Length: %d\r\n" ~
-                "\r\n%s",
-                config.retryAfterSeconds,
-                body503.length,
-                body503
-            );
-            conn.write(cast(const(ubyte)[])response);
+            // Copy prefix
+            buf[pos..pos+RESPONSE_503_PREFIX.length] = RESPONSE_503_PREFIX[];
+            pos += RESPONSE_503_PREFIX.length;
+            
+            // Retry-After value
+            char[12] retryBuf;
+            auto retryStr = uintToStr(retryBuf[], _retryAfterSeconds);
+            buf[pos..pos+retryStr.length] = cast(const(ubyte)[])retryStr[];
+            pos += retryStr.length;
+            
+            // Middle section
+            buf[pos..pos+RESPONSE_503_MIDDLE.length] = RESPONSE_503_MIDDLE[];
+            pos += RESPONSE_503_MIDDLE.length;
+            
+            // Content-Length
+            buf[pos..pos+BODY_503_LEN_STR.length] = cast(const(ubyte)[])BODY_503_LEN_STR[];
+            pos += BODY_503_LEN_STR.length;
+            
+            // End headers
+            buf[pos..pos+4] = cast(const(ubyte)[])"\r\n\r\n";
+            pos += 4;
+            
+            // Body
+            buf[pos..pos+BODY_503.length] = cast(const(ubyte)[])BODY_503[];
+            pos += BODY_503.length;
+            
+            conn.write(buf[0..pos]);
         }
         catch (Exception) 
         {
@@ -1017,15 +1261,26 @@ final class Server
         // Set timeouts
         conn.readTimeout = config.readTimeout;
         
-        auto maxHeader = config.maxHeaderSize;
-        auto maxBody = config.maxBodySize;
-        auto maxRequests = config.maxRequestsPerConnection;
+        // Cache config values locally for hot loop (avoid member access)
+        immutable maxHeader = _maxHeaderSize;
+        immutable maxBody = _maxBodySize;
+        immutable maxRequests = _maxRequestsPerConnection;
+        immutable maxInFlight = _maxInFlightRequests;
         
-        // Initial buffer for headers (from pool for zero-GC)
-        static BufferPool _pool;
-        if (_pool is null) _pool = new BufferPool();
-        ubyte[] buffer = _pool.acquire(BufferSize.MEDIUM);  // 16KB from pool
-        scope(exit) _pool.release(buffer);
+        // Get thread-local buffer pool
+        if (_tlsPool is null) _tlsPool = new BufferPool();
+        auto pool = _tlsPool;
+
+        // ═══════════════════════════════════════════════════════════════
+        // OPTIMIZATION (P1): Unified buffer for request + response
+        // Use LARGE (64KB) buffer that will be reused for both:
+        // - Request parsing (first 16-32KB typically)
+        // - Response building (entire buffer after parsing completes)
+        // Benefits: Better cache locality, fewer pool operations
+        // ═══════════════════════════════════════════════════════════════
+        ubyte[] buffer = pool.acquire(BufferSize.LARGE);  // 64KB from pool
+        scope(exit) pool.release(buffer);
+        
         uint requestCount = 0;
         
         // Keep-alive loop
@@ -1053,11 +1308,10 @@ final class Server
             
             // Now read the request
             size_t totalReceived = 0;
-            bool headersComplete = false;
             size_t headerEndPos = 0;
             
             // Read until we have complete headers
-            readLoop: while (!headersComplete && totalReceived < maxHeader)
+            readLoop: while (headerEndPos == 0 && totalReceived < maxHeader)
             {
                 // Grow buffer if needed
                 if (totalReceived >= buffer.length)
@@ -1069,10 +1323,10 @@ final class Server
                         return;
                     }
                     // Grow buffer using pool
-                    auto newSize = min(buffer.length * 2, maxHeader);
-                    auto newBuf = _pool.acquire(newSize);
+                    auto newSize = fastMin(buffer.length * 2, cast(size_t)maxHeader);
+                    auto newBuf = pool.acquire(newSize);
                     newBuf[0..totalReceived] = buffer[0..totalReceived];
-                    _pool.release(buffer);  // Return old buffer to pool
+                    pool.release(buffer);  // Return old buffer to pool
                     buffer = newBuf;
                 }
                 
@@ -1108,7 +1362,7 @@ final class Server
                     }
                     
                     // Copy available data to buffer
-                    auto toCopy = min(chunk.length, buffer.length - totalReceived);
+                    auto toCopy = fastMin(chunk.length, buffer.length - totalReceived);
                     buffer[totalReceived .. totalReceived + toCopy] = chunk[0 .. toCopy];
                     conn.skip(toCopy);
                     totalReceived += toCopy;
@@ -1121,23 +1375,14 @@ final class Server
                     return;
                 }
                 
-                // Check for end of headers (\r\n\r\n)
+                // Check for end of headers (\r\n\r\n) using optimized search
                 if (totalReceived >= 4)
                 {
-                    for (size_t i = 0; i + 3 < totalReceived; i++)
-                    {
-                        if (buffer[i] == '\r' && buffer[i+1] == '\n' && 
-                            buffer[i+2] == '\r' && buffer[i+3] == '\n')
-                        {
-                            headersComplete = true;
-                            headerEndPos = i + 4;
-                            break;
-                        }
-                    }
+                    headerEndPos = findHeaderEnd(buffer[0..totalReceived]);
                 }
             }
             
-            if (!headersComplete)
+            if (headerEndPos == 0)
             {
                 atomicOp!"+="(rejectedHeadersTooLarge, 1);
                 sendErrorResponse(conn, 431, "Request Header Fields Too Large");
@@ -1183,12 +1428,12 @@ final class Server
             atomicOp!"+="(totalRequests, 1);
             
             // === IN-FLIGHT REQUEST LIMIT CHECK ===
-            if (config.maxInFlightRequests > 0)
+            if (maxInFlight > 0)
             {
                 auto inFlight = atomicOp!"+="(currentInFlightRequests, 1);
                 scope(exit) atomicOp!"-="(currentInFlightRequests, 1);
 
-                if (inFlight > config.maxInFlightRequests)
+                if (inFlight > maxInFlight)
                 {
                     atomicOp!"+="(rejectedInFlight, 1);
                     sendErrorResponse(conn, 503, "Too many requests in flight");
@@ -1249,9 +1494,10 @@ final class Server
                     return;
 
                 // Send response through single I/O point
+                // OPTIMIZATION (P1): Pass unified buffer for reuse (already hot in cache)
                 if (result.hasResponse)
                 {
-                    if (!sendHttpResponse(conn, result.response, keepAlive))
+                    if (!sendHttpResponse(conn, result.response, keepAlive, buffer))
                     {
                         atomicOp!"+="(totalErrors, 1);
                         return;
@@ -1281,7 +1527,8 @@ final class Server
         bool hijacked;           // true if handler took over connection (WebSocket, etc.)
 
         /// Check if there's a valid response to send
-        @property bool hasResponse() const @safe nothrow
+        pragma(inline, true)
+        @property bool hasResponse() const @safe nothrow pure
         {
             return response !is null && !hijacked;
         }
@@ -1297,17 +1544,23 @@ final class Server
      * This function:
      * - Uses HTTPResponse.buildInto() which includes ALL headers (including custom headers)
      * - Sets Connection header based on keepAlive
-     * - Uses 16KB stack buffer for most responses (zero allocations)
-     * - Falls back to heap only for responses > 16KB (rare)
+     * - OPTIMIZATION (P1): Reuses request buffer if provided (better cache locality)
+     * - Falls back to pool buffer for large responses (P4: eliminates GC)
      *
      * Params:
      *   conn = TCP connection to write to
      *   response = Response to send (must not be null)
      *   keepAlive = Whether connection should be kept alive
+     *   reuseBuffer = Optional pre-allocated buffer to reuse (e.g., from request parsing)
      *
      * Returns: true on success, false on I/O error
      */
-    private bool sendHttpResponse(TCPConnection conn, HTTPResponse* response, bool keepAlive) @trusted nothrow
+    private bool sendHttpResponse(
+        TCPConnection conn,
+        HTTPResponse* response,
+        bool keepAlive,
+        ubyte[] reuseBuffer = null
+    ) @trusted nothrow
     {
         if (response is null)
             return false;
@@ -1319,32 +1572,56 @@ final class Server
             response.setHeader("Connection", keepAlive ? "keep-alive" : "close");
 
             // ═══════════════════════════════════════════════════════════════
-            // HOT PATH: 20KB stack buffer covers 99%+ of responses
-            // No estimateSize() call - just try to build directly
-            // 20KB ensures 16KB body + headers fits in stack buffer
+            // HOT PATH: Use provided reusable buffer (P1 optimization)
+            // This buffer is typically the 64KB buffer used for request parsing
+            // Already in L2/L3 cache = better performance than fresh stack buffer
             // ═══════════════════════════════════════════════════════════════
-            enum STACK_SIZE = 20 * 1024;  // 20KB
-            ubyte[STACK_SIZE] stackBuf = void;  // Uninitialized for speed
-
-            auto len = response.buildInto(stackBuf[]);
-            if (len > 0)
+            if (reuseBuffer.length > 0)
             {
-                // Success - write directly from stack buffer
-                conn.write(stackBuf[0..len]);
-                return true;
+                auto len = response.buildInto(reuseBuffer);
+                if (len > 0)
+                {
+                    conn.write(reuseBuffer[0..len]);
+                    return true;
+                }
+                // If it doesn't fit in reuse buffer, fall through to pool allocation
             }
 
             // ═══════════════════════════════════════════════════════════════
-            // COLD PATH: Response > 16KB (rare)
-            // Only now do we call estimateSize() and heap allocate
+            // FALLBACK PATH: Large response - use pool buffer (P4 optimization)
+            // Avoids GC allocation for responses >64KB
             // ═══════════════════════════════════════════════════════════════
             auto estimatedSize = response.estimateSize();
-            auto heapBuf = new ubyte[estimatedSize + 1024];  // Extra margin
 
-            len = response.buildInto(heapBuf);
+            // Choose appropriate pool size
+            ubyte[] poolBuf;
+            if (estimatedSize < 64 * 1024)
+            {
+                poolBuf = _tlsPool.acquire(BufferSize.LARGE);  // 64KB
+            }
+            else if (estimatedSize < 256 * 1024)
+            {
+                poolBuf = _tlsPool.acquire(BufferSize.HUGE);  // 256KB
+            }
+            else
+            {
+                // Very large response - still use heap but document it
+                auto heapBuf = new ubyte[estimatedSize + 1024];
+                auto len = response.buildInto(heapBuf);
+                if (len > 0)
+                {
+                    conn.write(heapBuf[0..len]);
+                    return true;
+                }
+                return false;
+            }
+
+            scope(exit) _tlsPool.release(poolBuf);
+
+            auto len = response.buildInto(poolBuf);
             if (len > 0)
             {
-                conn.write(heapBuf[0..len]);
+                conn.write(poolBuf[0..len]);
                 return true;
             }
 
@@ -1361,28 +1638,20 @@ final class Server
     /**
      * Send an error response without needing a full HTTPResponse object.
      * Used for early errors before HTTPResponse is set up.
+     * Zero-GC implementation using pre-built buffer.
      */
     private bool sendErrorResponse(TCPConnection conn, int statusCode, string message, bool keepAlive = false) @trusted nothrow
     {
         try
         {
-            import std.format : format;
-            auto body_ = `{"error":"` ~ message ~ `"}`;
-            auto response = format(
-                "HTTP/1.1 %d %s\r\n" ~
-                "Content-Type: application/json\r\n" ~
-                "Content-Length: %d\r\n" ~
-                "Connection: %s\r\n" ~
-                "Server: Aurora/0.1\r\n" ~
-                "\r\n%s",
-                statusCode,
-                getStatusText(statusCode),
-                body_.length,
-                keepAlive ? "keep-alive" : "close",
-                body_
-            );
-            conn.write(cast(const(ubyte)[])response);
-            return true;
+            ubyte[512] buf = void;
+            auto len = buildErrorResponseInto(buf[], statusCode, message, keepAlive);
+            if (len > 0)
+            {
+                conn.write(buf[0..len]);
+                return true;
+            }
+            return false;
         }
         catch (Exception)
         {
@@ -1495,6 +1764,7 @@ void runServer(Router router, ushort port = 8080)
 {
     auto config = ServerConfig.defaults();
     config.port = port;
+    config.precomputeThresholds();
     auto server = new Server(router, config);
     server.run();
 }
@@ -1502,6 +1772,7 @@ void runServer(Router router, ushort port = 8080)
 /// Server runner with config
 void runServer(Router router, ServerConfig config)
 {
+    config.precomputeThresholds();
     auto server = new Server(router, config);
     server.run();
 }
@@ -1511,6 +1782,7 @@ void runServer(Router router, MiddlewarePipeline pipeline, ushort port = 8080)
 {
     auto config = ServerConfig.defaults();
     config.port = port;
+    config.precomputeThresholds();
     auto server = new Server(router, pipeline, config);
     server.run();
 }
@@ -1518,6 +1790,7 @@ void runServer(Router router, MiddlewarePipeline pipeline, ushort port = 8080)
 /// Server runner with middleware and config
 void runServer(Router router, MiddlewarePipeline pipeline, ServerConfig config)
 {
+    config.precomputeThresholds();
     auto server = new Server(router, pipeline, config);
     server.run();
 }

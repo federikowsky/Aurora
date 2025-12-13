@@ -233,6 +233,75 @@ string[string] parseFormData(const(char)[] data) pure @trusted
     return result;
 }
 
+/**
+ * Streaming form parser (zero intermediate allocations)
+ *
+ * Parses form data in a single pass calling a callback for each field.
+ * No intermediate arrays or associative arrays are allocated.
+ *
+ * Params:
+ *   data = Form-encoded data (e.g., "name=John&email=test%40example.com")
+ *   callback = Called for each key-value pair (values are URL-encoded)
+ *              Callback receives slices into the input buffer
+ *
+ * Example:
+ * ---
+ * parseFormStreaming("a=1&b=2", (key, value) {
+ *     writeln(key, " = ", formDecode(value));
+ * });
+ * ---
+ */
+void parseFormStreaming(
+    const(char)[] data,
+    scope void delegate(const(char)[] key, const(char)[] value) nothrow callback
+) nothrow @trusted
+{
+    if (data.length == 0)
+        return;
+
+    size_t pos = 0;
+
+    // Single-pass parsing
+    while (pos < data.length)
+    {
+        // Find key end
+        size_t keyEnd = pos;
+        while (keyEnd < data.length && data[keyEnd] != '=' && data[keyEnd] != '&')
+            keyEnd++;
+
+        if (keyEnd > pos)
+        {
+            const(char)[] key = data[pos .. keyEnd];
+
+            if (keyEnd < data.length && data[keyEnd] == '=')
+            {
+                // Extract value
+                size_t valStart = keyEnd + 1;
+                size_t valEnd = valStart;
+                while (valEnd < data.length && data[valEnd] != '&')
+                    valEnd++;
+
+                const(char)[] value = data[valStart .. valEnd];
+
+                // Invoke callback with raw (still encoded) key and value
+                callback(key, value);
+
+                pos = valEnd;
+            }
+            else
+            {
+                // Key without value
+                callback(key, "");
+                pos = keyEnd;
+            }
+        }
+
+        // Skip '&'
+        if (pos < data.length && data[pos] == '&')
+            pos++;
+    }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ════════════════════════════════════════════════════════════════════════════
