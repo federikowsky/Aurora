@@ -2,6 +2,11 @@
 /+ dub.sdl:
     name "aurora_profiling_benchmark"
     dependency "aurora" path=".."
+    
+    buildType "profiling" {
+        dflags-ldc2 "-O3" "-release" "-boundscheck=off" "-mcpu=native" "-enable-inlining"
+        dflags-dmd "-O" "-release" "-inline" "-g" "-vgc" "-profile=gc"
+    }
 +/
 /**
  * Aurora Profiling Benchmark Server

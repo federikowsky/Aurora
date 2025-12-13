@@ -4,6 +4,9 @@ import std.stdio;
 import core.runtime;
 import core.stdc.stdlib : exit;
 
+import tests.unit.mem.pressure_test;
+import tests.unit.web.bulkhead_test;
+
 void main()
 {
     writeln("=== Aurora Test Suite ===\n");

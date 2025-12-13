@@ -401,6 +401,14 @@ struct ResponseBuffer
 {
     private ubyte[] data;
     private bool built;
+    private bool keepAlive_ = true;  // Default: keep-alive
+    
+    /// Set keep-alive flag before calling handler
+    pragma(inline, true)
+    void setKeepAlive(bool value) @safe nothrow pure
+    {
+        keepAlive_ = value;
+    }
     
     void write(int statusCode, string contentType, const(ubyte)[] body_) @trusted
     {
@@ -410,7 +418,7 @@ struct ResponseBuffer
         auto bufSize = body_.length + 512;
         data = new ubyte[bufSize];
         
-        auto len = buildResponseInto(data, statusCode, contentType, cast(string)body_, true);
+        auto len = buildResponseInto(data, statusCode, contentType, cast(string)body_, keepAlive_);
         
         if (len > 0)
             data = data[0..len];
@@ -1453,6 +1461,10 @@ final class Server
                 keepAlive = false;
             else if (request.httpVersion() == "HTTP/1.0" && connHeader != "keep-alive")
                 keepAlive = false;
+            
+            // Force close on last allowed request (fixes off-by-one keep-alive bug)
+            if (maxRequests > 0 && requestCount >= maxRequests)
+                keepAlive = false;
 
             // Set up Context with pointers to our stack-local data
             Context ctx;
@@ -1467,6 +1479,7 @@ final class Server
             {
                 // Simple handler mode (legacy API)
                 auto respBuffer = ResponseBuffer();
+                respBuffer.setKeepAlive(keepAlive);  // Honor keep-alive decision
                 try
                 {
                     handler(&request, respBuffer);
