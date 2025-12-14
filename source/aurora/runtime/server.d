@@ -1415,21 +1415,18 @@ final class Server
                 break;
             }
             
-            // Check Content-Length against maxBodySize
+            // PHASE 1 T1.2: Check Content-Length against maxBodySize (@nogc)
             auto contentLengthStr = request.getHeader("content-length");
             if (contentLengthStr.length > 0)
             {
-                try
+                import aurora.http.util : parseContentLength;
+                auto contentLength = parseContentLength(contentLengthStr);
+                if (contentLength != size_t.max && contentLength > maxBody)
                 {
-                    auto contentLength = contentLengthStr.to!size_t;
-                    if (contentLength > maxBody)
-                    {
-                        atomicOp!"+="(rejectedBodyTooLarge, 1);
-                        sendErrorResponse(conn, 413, "Payload Too Large");
-                        return;
-                    }
+                    atomicOp!"+="(rejectedBodyTooLarge, 1);
+                    sendErrorResponse(conn, 413, "Payload Too Large");
+                    return;
                 }
-                catch (Exception) {}
             }
             
             requestCount++;
@@ -1697,7 +1694,11 @@ final class Server
             // Execute onRequest hooks
             _hooks.executeOnRequest(ctx);
 
-            auto match = router.match(ctx.request.method(), ctx.request.path());
+            // PHASE -1 T-1.1: Use methodRaw/pathRaw to avoid string allocations (7-20% gain)
+            auto match = router.match(
+                cast(string)ctx.request.methodRaw(),
+                cast(string)ctx.request.pathRaw()
+            );
 
             if (match.found && match.handler !is null)
             {

@@ -1,9 +1,9 @@
 # Aurora Test Registry
 
-**Versione:** V0.5.0 "Solid Foundation"  
-**Ultimo Aggiornamento:** 4 Dicembre 2025  
-**Totale Test Cases:** 540+  
-**Test Modules:** 31  
+**Versione:** V0.8.0 "Test Organization"  
+**Ultimo Aggiornamento:** 13 Dicembre 2025  
+**Totale Test Cases:** 608+  
+**Test Modules:** 33  
 **Coverage Media:** 87%
 
 ---
@@ -27,19 +27,19 @@
 
 | Metrica | Valore |
 |---------|--------|
-| File di test totali | 31 |
-| Test cases (D) | 540+ |
+| File di test totali | 33 |
+| Test cases (D) | 608+ |
 | Test cases (Python) | 11 |
-| LOC test | ~10,200 |
-| LOC sorgente | ~8,400 |
-| Rapporto test/source | 1.21:1 |
+| LOC test | ~10,800 |
+| LOC sorgente | ~8,200 |
+| Rapporto test/source | 1.32:1 |
 
 ### 1.2 Distribuzione per Categoria
 
 | Categoria | File | Test Cases | % Totale |
 |-----------|------|------------|----------|
-| Unit Tests | 23 | 480+ | 87% |
-| Integration Tests | 6 | 60+ | 11% |
+| Unit Tests | 25 | 548+ | 90% |
+| Integration Tests | 6 | 60+ | 10% |
 | Stress Tests | 1 | 15 | 2% |
 | Real-World/Load | 4 | ~10 | <1% |
 
@@ -226,6 +226,19 @@
 | Pipeline Integration | 3 | Middleware chain, availability |
 | Factory Functions | 2 | requestIdMiddleware() variants |
 
+#### `bulkhead_test.d` - 32 test cases ✨ NEW (V0.8)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Config Defaults | 4 | Default values, constructor, factory methods |
+| Stats Calculation | 6 | Utilization, queue utilization, capacity checks |
+| Concurrency Control | 8 | Max concurrent enforcement, queue management |
+| Timeout Handling | 4 | Queue timeout, rejection behavior |
+| Edge Cases | 6 | Zero capacity, full queue, stats overflow |
+| Middleware Integration | 4 | Request flow, response handling, error propagation |
+
+**Note**: Tests moved from `source/aurora/web/middleware/bulkhead.d` to dedicated test file for better organization.
+
 ---
 
 ### 2.3 Metrics Module (`tests/unit/metrics/`)
@@ -281,6 +294,19 @@
 | Object Lifecycle | 6 | Create, reuse, destroy |
 | Pool Management | 5 | Size, capacity |
 | Thread Safety | 5 | Concurrent access |
+
+#### `pressure_test.d` - 36 test cases ✨ NEW (V0.8)
+
+| Categoria | # Test | Descrizione |
+|-----------|--------|-------------|
+| Memory Pressure Detection | 8 | High water, critical water detection |
+| GC Pressure Actions | 6 | GC_COLLECT, REJECT_503 actions |
+| Middleware Integration | 8 | Memory pressure middleware behavior |
+| Threshold Configuration | 6 | Config validation, threshold ratios |
+| Edge Cases | 4 | Zero heap, negative ratios, overflow |
+| Performance | 4 | Low overhead, no GC in hot path |
+
+**Note**: Tests moved from `source/aurora/mem/pressure.d` to dedicated test file for better organization.
 
 ---
 
@@ -570,6 +596,21 @@
 ---
 
 ## 8. Changelog Test
+
+### V0.8.0 (13 Dicembre 2025) ✨ NEW
+
+**Refactoring:**
+- `pressure_test.d` - 36 test cases per memory pressure (spostati da `source/aurora/mem/pressure.d`)
+- `bulkhead_test.d` - 32 test cases per bulkhead middleware (spostati da `source/aurora/web/middleware/bulkhead.d`)
+
+**Miglioramenti Organizzazione:**
+- Test unitari separati dai file sorgente per migliore manutenibilità
+- Test runner aggiornato per includere i nuovi file di test
+- Coverage mantenuto al 87% con migliore struttura
+
+**Totale Nuovi Test Cases:** +68 (refactoring da inline a file dedicati)
+
+---
 
 ### V0.4.0 (26 Gennaio 2025) ✨ NEW
 

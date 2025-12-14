@@ -286,6 +286,34 @@ char[] intToBuffer(long value, char[] buffer) @safe @nogc nothrow pure
 }
 
 /**
+ * Parse Content-Length from string without allocation.
+ * Returns size_t.max on invalid input (non-numeric chars).
+ *
+ * PHASE 1 T1.1: @nogc replacement for std.conv.to!size_t
+ */
+size_t parseContentLength(const(char)[] s) @safe @nogc nothrow pure
+{
+    if (s.length == 0)
+        return size_t.max;
+
+    size_t result = 0;
+    foreach (c; s)
+    {
+        if (c < '0' || c > '9')
+            return size_t.max;  // Invalid character
+
+        // Check for overflow
+        size_t newResult = result * 10 + (c - '0');
+        if (newResult < result)  // Overflow occurred
+            return size_t.max;
+
+        result = newResult;
+    }
+
+    return result;
+}
+
+/**
  * Build HTTP response directly into buffer.
  * Returns number of bytes written, or 0 if buffer too small.
  * 

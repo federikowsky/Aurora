@@ -103,9 +103,14 @@ void main()
     auto config = ServerConfig.defaults();
     config.port = 8080;
     config.numWorkers = 0;  // Auto-detect CPU cores
-    config.maxConnections = 0;  // Disable backpressure for pure benchmark
-    config.maxInFlightRequests = 0;  // Disable in-flight limit
+    config.maxConnections = 0;  // Unlimited connections
+    config.maxInFlightRequests = 0;  // Unlimited in-flight requests
+    config.maxRequestsPerConnection = 0;  // Unlimited requests per connection (keep-alive)
+    config.readTimeout = 300.seconds;  // 5 minutes (long benchmarks)
+    config.writeTimeout = 300.seconds;  // 5 minutes (long benchmarks)
+    config.keepAliveTimeout = 600.seconds;  // 10 minutes (long keep-alive for benchmarks)
     config.debugMode = false;  // Disable debug logging for accurate timing
+
 
     auto app = new App(config);
 

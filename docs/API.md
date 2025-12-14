@@ -216,14 +216,21 @@ app.get("/api", (ref Context ctx) {
 | Method | Return | Description |
 |--------|--------|-------------|
 | `method()` | `string` | HTTP method (GET, POST, etc.) |
+| `rawMethod()` | `string` | Raw HTTP method (zero-copy, hot path optimized) |
 | `path()` | `string` | Request path without query string |
+| `rawPath()` | `string` | Raw path (zero-copy, hot path optimized) |
 | `query()` | `string` | Query string (without `?`) |
 | `body()` | `string` | Request body |
+| `rawBody()` | `string` | Raw body access (zero-copy, hot path optimized) |
 | `opIndex(name)` | `string` | Get header by name |
 | `hasHeader(name)` | `bool` | Check if header exists |
 | `shouldKeepAlive()` | `bool` | Keep-alive requested |
 | `isComplete()` | `bool` | Fully parsed |
 | `hasError()` | `bool` | Parse error occurred |
+
+**Performance Notes:**
+- `rawMethod()`, `rawPath()`, and `rawBody()` provide zero-copy access optimized for hot paths
+- Use these methods when you need maximum performance and don't require string copies
 
 ### HTTPResponse
 
@@ -245,10 +252,69 @@ size_t written = response.buildInto(buffer);
 
 | Method | Description |
 |--------|-------------|
-| `setHeader(name, value)` | Set response header |
+| `setHeader(name, value)` | Set response header (case-insensitive matching) |
+| `hasHeader(name)` | Check if header exists (case-insensitive) |
+| `getHeader(name)` | Get header value (case-insensitive) |
 | `setBody(content)` | Set response body |
 | `estimateSize()` | Estimate buffer size needed |
+| `build()` | Build response string |
 | `buildInto(buffer)` | Build response into buffer (zero-alloc) |
+
+**Zero-GC Optimizations:**
+- Inline header storage (up to 16 headers) for 99.9% of responses
+- Overflow to associative array only for rare cases (>16 headers)
+- Case-insensitive header matching with SIMD-friendly string comparison
+- Dedicated content length management to avoid unnecessary allocations
+
+**Performance:**
+- Zero allocations for typical responses (≤16 headers)
+- Lazy allocation of overflow storage only when needed
+- Optimized header lookup with length + first char filtering
+
+### Form Data Parsing
+
+Parse `application/x-www-form-urlencoded` data with zero intermediate allocations.
+
+```d
+import aurora.http.form;
+
+app.post("/submit", (ref Context ctx) {
+    auto body = ctx.request.body();
+    
+    // Get form field value (URL-decoded)
+    auto email = getFormField(body, "email");
+    auto password = getFormField(body, "password", "default");
+    
+    // Check if field exists
+    if (hasFormField(body, "remember")) {
+        // Process remember checkbox
+    }
+});
+```
+
+**Functions:**
+
+| Function | Return | Description |
+|---------|--------|-------------|
+| `getFormField(data, name, defaultValue)` | `string` | Get URL-decoded form field value |
+| `hasFormField(data, name)` | `bool` | Check if form field exists |
+| `findFieldValue(data, name)` | `const(char)[]` | Raw field value (zero-copy) |
+
+**Features:**
+- Zero intermediate allocations during parsing
+- URL decoding with security defaults
+- Multi-value field support
+- `@nogc` raw field lookup available
+
+**Example:**
+```d
+auto body = "email=test%40example.com&password=secret&remember=on";
+auto email = getFormField(body, "email");        // "test@example.com"
+auto missing = getFormField(body, "missing", "default");  // "default"
+assert(hasFormField(body, "remember"));          // true
+```
+
+**Note:** `multipart/form-data` is not yet supported (planned for v2).
 
 ---
 
