@@ -35,6 +35,7 @@ module benchmarks.profiling_server;
 import aurora;
 import aurora.runtime.server : Server, ServerConfig;
 import aurora.mem.pool : BufferPool;
+import core.stdc.stdlib : getenv;
 import core.time : seconds, msecs;
 import core.thread : Thread;
 import std.stdio : writeln, writefln;
@@ -44,10 +45,37 @@ import std.datetime.stopwatch : StopWatch, AutoStart;
 private immutable string BODY_4K;
 private immutable string BODY_16K;
 private immutable string JSON_MEDIUM;
+private immutable string JSON_USER_CREATED;
+private immutable string JSON_SMALL;
+
+pragma(inline, true)
+private string buildUserJson(const(char)[] userId)
+{
+    import std.array : appender;
+
+    // Keep body format stable for benchmarks while avoiding std.format allocation churn.
+    enum prefix1 = `{"id":`;
+    enum mid1 = `,"name":"User `;
+    enum mid2 = `","email":"user`;
+    enum suffix = `@example.com","role":"member","created_at":"2024-01-15T10:30:00Z"}`;
+
+    size_t cap = prefix1.length + (userId.length * 3) + mid1.length + mid2.length + suffix.length;
+    auto buf = appender!string();
+    buf.reserve(cap);
+    buf ~= prefix1;
+    buf ~= userId;
+    buf ~= mid1;
+    buf ~= userId;
+    buf ~= mid2;
+    buf ~= userId;
+    buf ~= suffix;
+    return buf.data;
+}
 
 shared static this()
 {
     import std.array : appender;
+    import std.conv : to;
 
     // Generate 4KB body
     auto buf4k = appender!string();
@@ -77,8 +105,6 @@ shared static this()
     {
         if (i > 0) jsonBuf ~= ",";
         jsonBuf ~= `{"id":`;
-        jsonBuf ~= (1000 + i).stringof;
-        import std.conv : to;
         jsonBuf ~= (1000 + i).to!string;
         jsonBuf ~= `,"name":"User `;
         jsonBuf ~= (i + 1).to!string;
@@ -90,6 +116,10 @@ shared static this()
     }
     jsonBuf ~= `]}`;
     JSON_MEDIUM = jsonBuf.data.idup;
+
+    // Common JSON responses (stable formatting, no per-request serialization).
+    JSON_SMALL = `{"message":"Hello, World!","status":"ok"}`;
+    JSON_USER_CREATED = `{"id":"12345","status":"created","message":"User created successfully"}`;
 }
 
 void main()
@@ -111,6 +141,33 @@ void main()
     config.keepAliveTimeout = 600.seconds;  // 10 minutes (long keep-alive for benchmarks)
     config.debugMode = false;  // Disable debug logging for accurate timing
 
+    // Environment overrides (useful for diagnostics and CI).
+    // AURORA_PORT=18080
+    // AURORA_READ_TIMEOUT_MS=2000
+    // AURORA_WRITE_TIMEOUT_MS=2000
+    // AURORA_KEEPALIVE_TIMEOUT_MS=5000
+    try
+    {
+        import std.string : fromStringz;
+        import std.conv : to;
+
+        auto portEnv = getenv("AURORA_PORT");
+        if (portEnv !is null && portEnv[0] != 0)
+            config.port = cast(ushort)fromStringz(portEnv).to!uint;
+
+        auto rtoEnv = getenv("AURORA_READ_TIMEOUT_MS");
+        if (rtoEnv !is null && rtoEnv[0] != 0)
+            config.readTimeout = fromStringz(rtoEnv).to!ulong.msecs;
+
+        auto wtoEnv = getenv("AURORA_WRITE_TIMEOUT_MS");
+        if (wtoEnv !is null && wtoEnv[0] != 0)
+            config.writeTimeout = fromStringz(wtoEnv).to!ulong.msecs;
+
+        auto katoEnv = getenv("AURORA_KEEPALIVE_TIMEOUT_MS");
+        if (katoEnv !is null && katoEnv[0] != 0)
+            config.keepAliveTimeout = fromStringz(katoEnv).to!ulong.msecs;
+    }
+    catch (Exception) {}
 
     auto app = new App(config);
 
@@ -126,7 +183,9 @@ void main()
     // SCENARIO 2: JSON small (~50 bytes) - Typical API response
     // ════════════════════════════════════════════════════════════════════
     app.get("/json", (ref Context ctx) {
-        ctx.json(["message": "Hello, World!", "status": "ok"]);
+        // Keep benchmark stable: avoid per-request AA allocation + JSON serialization.
+        ctx.response.setHeader("Content-Type", "application/json");
+        ctx.send(JSON_SMALL);
     });
 
     // ════════════════════════════════════════════════════════════════════
@@ -166,12 +225,8 @@ void main()
         ctx.response.setHeader("Cache-Control", "private, max-age=60");
         ctx.response.setHeader("ETag", "\"abc123def456\"");
 
-        // JSON response with user data
-        import std.format : format;
-        auto json = format(
-            `{"id":%s,"name":"User %s","email":"user%s@example.com","role":"member","created_at":"2024-01-15T10:30:00Z"}`,
-            userId, userId, userId
-        );
+        // JSON response with user data (allocates once per request).
+        auto json = buildUserJson(userId);
         ctx.response.setHeader("Content-Type", "application/json");
         ctx.send(json);
     });
@@ -189,11 +244,8 @@ void main()
 
         // Return created response
         ctx.response.setStatus(201);
-        ctx.json([
-            "id": "12345",
-            "status": "created",
-            "message": "User created successfully"
-        ]);
+        ctx.response.setHeader("Content-Type", "application/json");
+        ctx.send(JSON_USER_CREATED);
     });
 
     // ════════════════════════════════════════════════════════════════════

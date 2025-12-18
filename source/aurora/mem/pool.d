@@ -89,16 +89,19 @@ class BufferPool
     private ubyte[][MAX_BUFFERS_PER_BUCKET][NUM_BUCKETS] freeLists;
     private size_t[NUM_BUCKETS] freeCounts;
 
-    // Track non-pooled buffers to prevent double-free
-    private void*[256] allocatedBuffers;
-    private size_t allocatedCount;
+    // Track non-pooled buffers to prevent double-free (fixed-size, @nogc).
+    // Open addressing avoids O(n) scans when large responses use the non-pooled path.
+    private enum NON_POOLED_TRACK_SIZE = 256;          // power-of-2 for fast masking
+    private enum void* NON_POOLED_TOMBSTONE = cast(void*)1; // safe sentinel (allocs are aligned)
+    private void*[NON_POOLED_TRACK_SIZE] nonPooledTrack;
+    private size_t nonPooledTrackCount;
     
     // === Metrics (Production Monitoring) ===
     private size_t _poolHits;           // Buffer returned from pool
     private size_t _poolMisses;         // New buffer allocated (pool empty)
     private size_t _fallbackAllocs;     // Oversized buffer (larger than HUGE)
     private size_t _poolFullDrops;      // Buffer freed because pool was full
-    
+
     // Global metrics (thread-safe, for aggregation)
     private static shared ulong globalPoolMisses;
     private static shared ulong globalFallbackAllocs;
@@ -221,11 +224,13 @@ class BufferPool
         }
         
         // Free tracked non-pooled buffers
-        for (size_t i = 0; i < allocatedCount; i++)
+        foreach (ref p; nonPooledTrack)
         {
-            free(allocatedBuffers[i]);
+            if (p !is null && p != NON_POOLED_TOMBSTONE)
+                free(p);
+            p = null;
         }
-        allocatedCount = 0;
+        nonPooledTrackCount = 0;
     }
     
     ~this()
@@ -298,16 +303,13 @@ class BufferPool
      */
     private static int findBucketIndex(size_t size) @nogc @safe nothrow pure
     {
-        if (size == 0)
-            return 0; // TINY
-        
-        foreach (i, bucketSize; BUCKET_SIZES)
-        {
-            if (size <= bucketSize)
-                return cast(int)i;
-        }
-        
-        return -1; // Larger than all buckets
+        // Hot path: comparisons are faster than looping for a fixed 5-bucket scheme.
+        if (size <= BufferSize.TINY)   return 0;
+        if (size <= BufferSize.SMALL)  return 1;
+        if (size <= BufferSize.MEDIUM) return 2;
+        if (size <= BufferSize.LARGE)  return 3;
+        if (size <= BufferSize.HUGE)   return 4;
+        return -1;
     }
     
     /**
@@ -316,12 +318,103 @@ class BufferPool
      */
     private static int findBucketByExactSize(size_t size) @nogc @safe nothrow pure
     {
-        foreach (i, bucketSize; BUCKET_SIZES)
+        // Exact match is common on release() hot path, so avoid a loop.
+        switch (size)
         {
-            if (size == bucketSize)
-                return cast(int)i;
+            case BufferSize.TINY:   return 0;
+            case BufferSize.SMALL:  return 1;
+            case BufferSize.MEDIUM: return 2;
+            case BufferSize.LARGE:  return 3;
+            case BufferSize.HUGE:   return 4;
+            default:                return -1;
         }
-        return -1;
+    }
+
+    pragma(inline, true)
+    private static size_t hashPtr(void* p) @nogc nothrow pure @trusted
+    {
+        // Pointer hash for open addressing (no allocations, good dispersion).
+        size_t x = cast(size_t)p;
+        static if (size_t.sizeof == 8)
+        {
+            x ^= x >> 33;
+            x *= 0x9E3779B97F4A7C15UL;
+            x ^= x >> 29;
+        }
+        else
+        {
+            x ^= x >> 16;
+            x *= 0x9E3779B9U;
+            x ^= x >> 13;
+        }
+        return x;
+    }
+
+    private bool trackNonPooled(void* p) @nogc @trusted nothrow
+    {
+        if (p is null)
+            return false;
+
+        // Best-effort: don't track if table is saturated.
+        if (nonPooledTrackCount + 1 >= NON_POOLED_TRACK_SIZE)
+            return false;
+
+        enum mask = NON_POOLED_TRACK_SIZE - 1;
+        size_t idx = hashPtr(p) & mask;
+        size_t firstTomb = size_t.max;
+
+        foreach (_; 0 .. NON_POOLED_TRACK_SIZE)
+        {
+            auto cur = nonPooledTrack[idx];
+            if (cur is null)
+            {
+                if (firstTomb != size_t.max)
+                    idx = firstTomb;
+                nonPooledTrack[idx] = p;
+                nonPooledTrackCount++;
+                return true;
+            }
+            if (cur == NON_POOLED_TOMBSTONE)
+            {
+                if (firstTomb == size_t.max)
+                    firstTomb = idx;
+            }
+            else if (cur == p)
+            {
+                debug assert(false, "Non-pooled buffer tracked twice (unexpected reuse)");
+                return true;
+            }
+
+            idx = (idx + 1) & mask;
+        }
+
+        return false;
+    }
+
+    private bool untrackNonPooled(void* p) @nogc @trusted nothrow
+    {
+        if (p is null)
+            return false;
+
+        enum mask = NON_POOLED_TRACK_SIZE - 1;
+        size_t idx = hashPtr(p) & mask;
+
+        foreach (_; 0 .. NON_POOLED_TRACK_SIZE)
+        {
+            auto cur = nonPooledTrack[idx];
+            if (cur is null)
+                return false;
+            if (cur == p)
+            {
+                nonPooledTrack[idx] = NON_POOLED_TOMBSTONE;
+                if (nonPooledTrackCount)
+                    nonPooledTrackCount--;
+                return true;
+            }
+            idx = (idx + 1) & mask;
+        }
+
+        return false;
     }
     
     /**
@@ -333,13 +426,9 @@ class BufferPool
         
         if (buffer.ptr is null)
             return null;
-        
-        // Track for double-free prevention
-        if (allocatedCount < allocatedBuffers.length)
-        {
-            allocatedBuffers[allocatedCount] = buffer.ptr;
-            allocatedCount++;
-        }
+
+        // Track for double-free prevention (best effort).
+        trackNonPooled(buffer.ptr);
         
         return buffer;
     }
@@ -349,19 +438,10 @@ class BufferPool
      */
     private void releaseNonPooledBuffer(ubyte[] buffer) @nogc @trusted nothrow
     {
-        // Find buffer in tracking array
-        for (size_t i = 0; i < allocatedCount; i++)
+        if (untrackNonPooled(buffer.ptr))
         {
-            if (allocatedBuffers[i] == buffer.ptr)
-            {
-                // Free buffer
-                free(buffer.ptr);
-                
-                // Remove from tracking (swap with last)
-                allocatedBuffers[i] = allocatedBuffers[allocatedCount - 1];
-                allocatedCount--;
-                return;
-            }
+            free(buffer.ptr);
+            return;
         }
         
         // Buffer not found in tracking - potential double-free or invalid buffer
@@ -381,41 +461,42 @@ class BufferPool
     {
         if (size == 0)
             return null;
+        auto allocSize = size;
         
         version(Posix)
         {
             // Allocate cache-line aligned buffer using posix_memalign
             void* ptr;
-            int result = posix_memalign(&ptr, CACHE_LINE_SIZE, size);
+            int result = posix_memalign(&ptr, CACHE_LINE_SIZE, allocSize);
             
             if (result != 0 || ptr is null)
                 return null;
             
             // Zero the buffer for security
-            memset(ptr, 0, size);
+            memset(ptr, 0, allocSize);
             
             return (cast(ubyte*)ptr)[0 .. size];
         }
         else version(Windows)
         {
             // Windows: use _aligned_malloc for cache-line alignment
-            void* ptr = _aligned_malloc(size, CACHE_LINE_SIZE);
+            void* ptr = _aligned_malloc(allocSize, CACHE_LINE_SIZE);
             
             if (ptr is null)
                 return null;
             
-            memset(ptr, 0, size);
+            memset(ptr, 0, allocSize);
             return (cast(ubyte*)ptr)[0 .. size];
         }
         else
         {
             // Fallback - use malloc (not aligned)
-            void* ptr = malloc(size);
+            void* ptr = malloc(allocSize);
             
             if (ptr is null)
                 return null;
             
-            memset(ptr, 0, size);
+            memset(ptr, 0, allocSize);
             return (cast(ubyte*)ptr)[0 .. size];
         }
     }

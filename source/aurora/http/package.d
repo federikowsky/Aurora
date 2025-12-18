@@ -39,7 +39,7 @@ import std.array : appender;
  */
 struct HTTPRequest
 {
-    private ParserWrapper wrapper;
+    private ParsedHttpRequest parsed;
     private bool valid;
     
     /**
@@ -49,11 +49,28 @@ struct HTTPRequest
     {
         import wire.bindings : llhttp_errno;
         HTTPRequest req;
-        req.wrapper = parseHTTP(data);
+        // Parse using Wire/llhttp but immediately copy out the ParsedHttpRequest.
+        // This avoids holding a thread-local parser across fiber yields.
+        auto wrapper = parseHTTP(data);
+        req.parsed = wrapper.request;
         // Valid if no error OR if it's an upgrade request (HPE_PAUSED_UPGRADE)
-        auto errorCode = req.wrapper.request.content.errorCode;
+        auto errorCode = req.parsed.content.errorCode;
         req.valid = (errorCode == 0 || errorCode == llhttp_errno.HPE_PAUSED_UPGRADE);
         return req;
+    }
+
+    /**
+     * Override body slice (server framing/decoding).
+     *
+     * Used by Aurora runtime to provide a stable, correct body view for
+     * Content-Length and chunked requests without relying on llhttp on_body
+     * callback behavior.
+     */
+    void setBodyRaw(scope const(ubyte)[] body) @nogc nothrow @trusted
+    {
+        auto s = cast(const(char)[])body;
+        parsed.content.body = StringView(s);
+        parsed.routing.messageComplete = true;
     }
     
     /**
@@ -62,7 +79,7 @@ struct HTTPRequest
     string method()
     {
         if (!valid) return "";
-        return wrapper.getMethod().toString();
+        return parsed.getMethod().toString();
     }
 
     /**
@@ -86,7 +103,7 @@ struct HTTPRequest
     {
         if (!valid) return null;
 
-        auto view = (cast()wrapper).getMethod();
+        auto view = parsed.getMethod();
         if (view.empty) return null;
 
         return view.ptr[0 .. view.length];
@@ -101,7 +118,7 @@ struct HTTPRequest
     string path()
     {
         if (!valid) return "";
-        string fullPath = wrapper.getPath().toString();
+        string fullPath = parsed.getPath().toString();
 
         // Find query string separator
         import std.string : indexOf;
@@ -132,7 +149,7 @@ struct HTTPRequest
     {
         if (!valid) return null;
 
-        auto view = (cast()wrapper).getPath();
+        auto view = parsed.getPath();
         if (view.empty) return null;
 
         return view.ptr[0 .. view.length];
@@ -148,12 +165,12 @@ struct HTTPRequest
         if (!valid) return "";
         
         // First try Wire's query field (check for null StringView)
-        auto wireQuery = wrapper.getQuery();
+        auto wireQuery = parsed.getQuery();
         if (!wireQuery.empty)
             return wireQuery.toString();
         
         // Fallback: parse from path
-        string fullPath = wrapper.getPath().toString();
+        string fullPath = parsed.getPath().toString();
         import std.string : indexOf;
         auto queryPos = fullPath.indexOf('?');
         
@@ -169,7 +186,7 @@ struct HTTPRequest
     string body()
     {
         if (!valid) return "";
-        return wrapper.getBody().toString();
+        return parsed.getBody().toString();
     }
 
     /**
@@ -196,7 +213,7 @@ struct HTTPRequest
     {
         if (!valid) return null;
 
-        auto view = (cast()wrapper).getBody();
+        auto view = parsed.getBody();
         if (view.empty) return null;
 
         return view.ptr[0 .. view.length];
@@ -208,7 +225,26 @@ struct HTTPRequest
     string httpVersion()
     {
         if (!valid) return "";
-        return wrapper.getVersion().toString();
+        return parsed.getVersion().toString();
+    }
+
+    /**
+     * Get raw HTTP version without allocation.
+     *
+     * Zero-copy, @nogc HTTP version access.
+     * Returns a slice into the request buffer - do not store beyond request lifetime.
+     *
+     * Use this in hot paths like keep-alive decisions.
+     */
+    pragma(inline, true)
+    const(char)[] httpVersionRaw() const @nogc nothrow @trusted
+    {
+        if (!valid) return null;
+
+        auto view = parsed.getVersion();
+        if (view.empty) return null;
+
+        return view.ptr[0 .. view.length];
     }
     
     /**
@@ -217,7 +253,7 @@ struct HTTPRequest
     string getHeader(string name) const @trusted
     {
         if (!valid) return "";
-        return (cast()wrapper).getHeader(name).toString();
+        return parsed.getHeader(name).toString();
     }
 
     /**
@@ -241,7 +277,7 @@ struct HTTPRequest
     {
         if (!valid) return null;
 
-        auto view = (cast()wrapper).getHeader(name);
+        auto view = parsed.getHeader(name);
         if (view.empty) return null;
 
         return view.ptr[0 .. view.length];
@@ -253,7 +289,7 @@ struct HTTPRequest
     bool hasHeader(string name)
     {
         if (!valid) return false;
-        return wrapper.hasHeader(name);
+        return parsed.hasHeader(name);
     }
 
     /**
@@ -265,7 +301,7 @@ struct HTTPRequest
     bool hasHeaderRaw(const(char)[] name) const @nogc nothrow @trusted
     {
         if (!valid) return false;
-        return (cast()wrapper).hasHeader(name);
+        return parsed.hasHeader(name);
     }
     
     /**
@@ -274,7 +310,7 @@ struct HTTPRequest
     bool shouldKeepAlive()
     {
         if (!valid) return false;
-        return wrapper.request.routing.flags & 0x01;
+        return parsed.routing.flags & 0x01;
     }
     
     /**
@@ -292,7 +328,7 @@ struct HTTPRequest
         
         // Use Wire parser's messageComplete flag set by llhttp on_message_complete callback
         // This is the REAL completion indicator, not a heuristic
-        return wrapper.request.routing.messageComplete;
+        return parsed.routing.messageComplete;
     }
     
     /**
@@ -326,7 +362,7 @@ struct HTTPRequest
         
         if (!valid) return defaultValue;
         
-        auto view = wrapper.request.getQueryParam(name);
+        auto view = parsed.getQueryParam(name);
         if (view.isNull) return defaultValue;
         
         return urlDecode(view.ptr[0 .. view.length], DecodeOptions.form());
@@ -343,7 +379,7 @@ struct HTTPRequest
     {
         if (!valid) return null;
         
-        auto view = wrapper.request.getQueryParam(name);
+        auto view = parsed.getQueryParam(name);
         if (view.isNull) return null;
         
         return view.ptr[0 .. view.length];
@@ -356,7 +392,7 @@ struct HTTPRequest
     bool hasQueryParam(const(char)[] name) @nogc nothrow @trusted
     {
         if (!valid) return false;
-        return wrapper.request.hasQueryParam(name);
+        return parsed.hasQueryParam(name);
     }
     
     /**

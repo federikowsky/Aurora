@@ -18,7 +18,7 @@ module aurora.runtime.server;
 
 // vibe-core networking
 import vibe.core.net : listenTCP, TCPListener, TCPConnection, TCPListenOptions;
-import vibe.core.core : runTask, runEventLoop, exitEventLoop, yield;
+import vibe.core.core : runTask, runEventLoop, exitEventLoop, yield, sleep;
 import vibe.core.log : logInfo, logWarn, logError, logDebug;
 
 // Aurora modules
@@ -30,6 +30,9 @@ import aurora.http.util : getStatusText, getStatusLine, buildResponseInto;
 import aurora.mem.pool : BufferPool, BufferSize;
 import aurora.runtime.hooks : ServerHooks, TypeErasedHandler, StartHook, StopHook, 
                                ErrorHook, RequestHook, ResponseHook, ExceptionHandler;
+
+// Wire
+import wire.types : isWhitespace, trimWhitespace, findHeaderEnd, StringView;
 
 // Worker pool for multi-threaded mode (Linux/FreeBSD only)
 version(linux)
@@ -49,10 +52,12 @@ else
 
 // Standard library
 import core.atomic;
+import core.thread : Fiber;
 import core.time;
 import core.stdc.string : memcpy, memchr;
 import std.stdio : stderr, writeln, writefln;
 import std.conv : to;
+import std.format : format;
 
 // ============================================================================
 // PLATFORM DETECTION
@@ -104,6 +109,18 @@ pragma(inline, true)
 private T fastMin(T)(T a, T b) @nogc nothrow pure @safe
 {
     return a < b ? a : b;
+}
+
+pragma(inline, true)
+private ulong fnv1a64(const(ubyte)[] data) @nogc nothrow @safe
+{
+    ulong h = 1469598103934665603UL;
+    foreach (b; data)
+    {
+        h ^= b;
+        h *= 1099511628211UL;
+    }
+    return h;
 }
 
 // ============================================================================
@@ -362,7 +379,7 @@ private size_t buildErrorResponseInto(ubyte[] buf, int statusCode, string messag
     pos += ERROR_MIDDLE.length;
     
     // Content-Length value: body is {"error":"<message>"}
-    auto bodyLen = 11 + message.length + 2;  // {"error":"..."}
+    auto bodyLen = ERROR_BODY_PREFIX.length + message.length + ERROR_BODY_SUFFIX.length;
     char[20] lenBuf;
     auto lenStr = uintToStr(lenBuf[], bodyLen);
     if (pos + lenStr.length >= buf.length) return 0;
@@ -456,31 +473,472 @@ alias RequestHandler = void delegate(scope HTTPRequest* request, scope ResponseB
 // FAST HEADER END SEARCH
 // ============================================================================
 
-/**
- * Fast search for \r\n\r\n pattern in buffer.
- * Optimized for modern CPUs with good branch prediction on the common case.
- * Returns position of first byte after \r\n\r\n, or 0 if not found.
- */
-pragma(inline, true)
-private size_t findHeaderEnd(const(ubyte)[] buf) @nogc nothrow pure @safe
+// ============================================================================
+// SMALL HTTP PARSING HELPERS (no allocations)
+// ============================================================================
+
+// Returns true iff Transfer-Encoding consists only of "chunked" tokens (case-insensitive).
+private bool isChunkedOnly(const(char)[] te) @nogc nothrow pure @safe
 {
-    if (buf.length < 4) return 0;
-    
-    // Fast path: search for \r first, then verify pattern
-    // This is cache-friendly and branch-predictor friendly
-    immutable len = buf.length - 3;
-    for (size_t i = 0; i < len; ++i)
+    bool sawChunked = false;
+    size_t i = 0;
+    while (i < te.length)
     {
-        // Common case: not a \r
-        if (buf[i] != '\r') continue;
-        
-        // Found \r, check for \n\r\n
-        // Combine checks for better pipelining
-        if (buf[i+1] == '\n' && buf[i+2] == '\r' && buf[i+3] == '\n')
-            return i + 4;
+        // Skip separators/whitespace
+        while (i < te.length && (te[i] == ',' || isWhitespace(te[i])))
+            i++;
+        if (i >= te.length) break;
+
+        auto start = i;
+        while (i < te.length && te[i] != ',')
+            i++;
+        auto token = trimWhitespace(te[start .. i]);
+        if (token.length == 0)
+            continue;
+        // Use StringView.equalsIgnoreCase() for comparison
+        auto tokenView = StringView(token);
+        if (!tokenView.equalsIgnoreCase("chunked"))
+            return false;
+        sawChunked = true;
     }
-    
-    return 0;
+    return sawChunked;
+}
+
+private void drainReadableNow(TCPConnection conn, size_t maxBytes = 256 * 1024) @trusted nothrow
+{
+    size_t drained = 0;
+    while (drained < maxBytes)
+    {
+        ubyte[] chunk;
+        try { chunk = cast(ubyte[])conn.peek(); }
+        catch (Exception) { return; }
+
+        if (chunk.length == 0)
+            return;
+
+        auto toSkip = chunk.length;
+        if (drained + toSkip > maxBytes)
+            toSkip = maxBytes - drained;
+
+        try { conn.skip(toSkip); }
+        catch (Exception) { return; }
+
+        drained += toSkip;
+    }
+}
+
+// Best-effort drain to avoid abortive close (RST) when rejecting a request.
+// Waits for additional in-flight bytes up to `waitTimeout` before giving up.
+private void drainForClose(TCPConnection conn, Duration waitTimeout, size_t maxBytes = 256 * 1024) @trusted
+{
+    // This is only used on error paths where the connection is about to be closed.
+    // Best-effort: shorten timeout while draining; no need to restore.
+    try { conn.readTimeout = waitTimeout; }
+    catch (Exception) {}
+
+    size_t drained = 0;
+    while (drained < maxBytes)
+    {
+        ubyte[] chunk;
+        try { chunk = cast(ubyte[])conn.peek(); }
+        catch (Exception) { return; }
+
+        if (chunk.length == 0)
+        {
+            bool closed;
+            try { closed = conn.empty; }
+            catch (Exception) { return; }
+            if (closed)
+                return;
+
+            bool ok = false;
+            try { ok = conn.waitForData(); }
+            catch (Exception) { return; }
+            if (!ok)
+                return;
+            continue;
+        }
+
+        auto toSkip = chunk.length;
+        if (drained + toSkip > maxBytes)
+            toSkip = maxBytes - drained;
+
+        try { conn.skip(toSkip); }
+        catch (Exception) { return; }
+
+        drained += toSkip;
+    }
+}
+
+// ============================================================================
+// CHUNKED BODY READER (streaming decode)
+// ============================================================================
+
+private enum ChunkedReadStatus
+{
+    ok,
+    timeout,
+    clientClosed,
+    tooLarge,
+    bad,
+}
+
+private bool parseChunkSizeLine(const(ubyte)[] line, out size_t size) @nogc nothrow pure @safe
+{
+    size_t i = 0;
+    while (i < line.length && (line[i] == ' ' || line[i] == '\t'))
+        i++;
+
+    if (i >= line.length)
+        return false;
+
+    bool any = false;
+    size_t v = 0;
+    while (i < line.length)
+    {
+        auto c = line[i];
+        uint digit;
+        if (c >= '0' && c <= '9') digit = c - '0';
+        else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+        else break;
+
+        any = true;
+        auto newV = v * 16 + digit;
+        if (newV < v)
+            return false;
+        v = newV;
+        i++;
+    }
+
+    if (!any)
+        return false;
+
+    while (i < line.length && (line[i] == ' ' || line[i] == '\t'))
+        i++;
+
+    // Allow chunk extensions (";..."), reject any other garbage.
+    if (i < line.length && line[i] != ';')
+        return false;
+
+    size = v;
+    return true;
+}
+
+private ChunkedReadStatus readExactFromConn(
+    TCPConnection conn,
+    ubyte[] dest
+) @trusted
+{
+    size_t off = 0;
+    while (off < dest.length)
+    {
+        ubyte[] chunk;
+        try { chunk = cast(ubyte[])conn.peek(); }
+        catch (Exception) { return ChunkedReadStatus.bad; }
+
+        if (chunk.length == 0)
+        {
+            bool closed;
+            try { closed = conn.empty; }
+            catch (Exception) { return ChunkedReadStatus.bad; }
+            if (closed)
+                return ChunkedReadStatus.clientClosed;
+
+            bool ok = false;
+            try { ok = conn.waitForData(); }
+            catch (Exception) { return ChunkedReadStatus.bad; }
+            if (!ok)
+                return ChunkedReadStatus.timeout;
+            continue;
+        }
+
+        auto toCopy = fastMin(chunk.length, dest.length - off);
+        dest[off .. off + toCopy] = chunk[0 .. toCopy];
+        try { conn.skip(toCopy); }
+        catch (Exception) { return ChunkedReadStatus.bad; }
+        off += toCopy;
+    }
+
+    return ChunkedReadStatus.ok;
+}
+
+// Consume bytes until "\r\n\r\n" is seen, bounded by maxBytes.
+private ChunkedReadStatus consumeUntilHeaderEnd(
+    TCPConnection conn,
+    size_t maxBytes
+) @trusted
+{
+    ubyte[3] tail = void;
+    size_t tailLen = 0;
+    size_t total = 0;
+
+    while (total < maxBytes)
+    {
+        ubyte[] chunk;
+        try { chunk = cast(ubyte[])conn.peek(); }
+        catch (Exception) { return ChunkedReadStatus.bad; }
+
+        if (chunk.length == 0)
+        {
+            bool closed;
+            try { closed = conn.empty; }
+            catch (Exception) { return ChunkedReadStatus.bad; }
+            if (closed)
+                return ChunkedReadStatus.clientClosed;
+
+            if (!conn.waitForData())
+                return ChunkedReadStatus.timeout;
+            continue;
+        }
+
+        auto maxCopy = chunk.length;
+        if (total + maxCopy > maxBytes)
+            maxCopy = maxBytes - total;
+        if (maxCopy == 0)
+            break;
+
+        auto need = findHeaderEnd(tail[0 .. tailLen], chunk[0 .. maxCopy]);
+        auto toConsume = (need != 0) ? need : maxCopy;
+
+        // Capture last bytes before skip (peek() slice may become invalid after skip()).
+        ubyte[3] last = void;
+        auto take = (toConsume > 3) ? 3 : toConsume;
+        if (take)
+            last[0 .. take] = chunk[toConsume - take .. toConsume];
+
+        try { conn.skip(toConsume); }
+        catch (Exception) { return ChunkedReadStatus.bad; }
+
+        // Update tail with the last up to 3 bytes of the consumed stream.
+        ubyte[6] tmp = void;
+        size_t tmpLen = 0;
+        if (tailLen)
+        {
+            tmp[0 .. tailLen] = tail[0 .. tailLen];
+            tmpLen = tailLen;
+        }
+        if (take)
+            tmp[tmpLen .. tmpLen + take] = last[0 .. take];
+        tmpLen += take;
+        if (tmpLen <= 3)
+        {
+            tail[0 .. tmpLen] = tmp[0 .. tmpLen];
+            tailLen = tmpLen;
+        }
+        else
+        {
+            tail[0 .. 3] = tmp[tmpLen - 3 .. tmpLen];
+            tailLen = 3;
+        }
+
+        total += toConsume;
+        if (need != 0)
+            return ChunkedReadStatus.ok;
+    }
+
+    return ChunkedReadStatus.bad;
+}
+
+private ChunkedReadStatus readLineCRLF(
+    TCPConnection conn,
+    ref ubyte[1024] lineBuf,
+    out size_t lineLen
+) @trusted
+{
+    lineLen = 0;
+    bool pendingLF = false; // we consumed '\r' at the end of an I/O chunk
+
+    while (true)
+    {
+        ubyte[] chunk;
+        try { chunk = cast(ubyte[])conn.peek(); }
+        catch (Exception) { return ChunkedReadStatus.bad; }
+
+        if (chunk.length == 0)
+        {
+            bool closed;
+            try { closed = conn.empty; }
+            catch (Exception) { return ChunkedReadStatus.bad; }
+            if (closed)
+                return ChunkedReadStatus.clientClosed;
+
+            bool ok = false;
+            try { ok = conn.waitForData(); }
+            catch (Exception) { return ChunkedReadStatus.bad; }
+            if (!ok)
+                return ChunkedReadStatus.timeout;
+            continue;
+        }
+
+        // If the previous chunk ended with '\r', we must see '\n' next.
+        if (pendingLF)
+        {
+            if (chunk[0] != '\n')
+                return ChunkedReadStatus.bad;
+
+            try { conn.skip(1); }
+            catch (Exception) { return ChunkedReadStatus.bad; }
+
+            return ChunkedReadStatus.ok;
+        }
+
+        // Search for '\r' in the currently available chunk. Chunk-size lines are tiny,
+        // but using memchr keeps the fast path branch-predictable and avoids per-byte peeks.
+        auto crPtr = cast(ubyte*)memchr(chunk.ptr, '\r', chunk.length);
+        if (crPtr is null)
+        {
+            // No terminator yet: bulk-copy and consume all available bytes.
+            immutable toCopy = chunk.length;
+            if (lineLen + toCopy > lineBuf.length)
+                return ChunkedReadStatus.bad;
+
+            memcpy(lineBuf.ptr + lineLen, chunk.ptr, toCopy);
+            try { conn.skip(toCopy); }
+            catch (Exception) { return ChunkedReadStatus.bad; }
+
+            lineLen += toCopy;
+            continue;
+        }
+
+        // Copy bytes before '\r' into lineBuf (CR is NOT part of the line content).
+        immutable crIdx = cast(size_t)(crPtr - chunk.ptr);
+        if (crIdx)
+        {
+            if (lineLen + crIdx > lineBuf.length)
+                return ChunkedReadStatus.bad;
+            memcpy(lineBuf.ptr + lineLen, chunk.ptr, crIdx);
+            lineLen += crIdx;
+        }
+
+        // We must not consume beyond CRLF: extra bytes belong to the next parse stage.
+        // Capture the next byte before skip() (peek() slice may become invalid after skip()).
+        if (crIdx + 1 >= chunk.length)
+        {
+            // '\r' is the last byte in this chunk; consume it and wait for '\n'.
+            try { conn.skip(crIdx + 1); }
+            catch (Exception) { return ChunkedReadStatus.bad; }
+
+            pendingLF = true;
+            continue;
+        }
+
+        immutable next = chunk[crIdx + 1];
+        if (next != '\n')
+            return ChunkedReadStatus.bad;
+
+        // Consume up to and including CRLF in one skip().
+        try { conn.skip(crIdx + 2); }
+        catch (Exception) { return ChunkedReadStatus.bad; }
+
+        return ChunkedReadStatus.ok;
+    }
+}
+
+private bool ensureBodyCapacity(
+    BufferPool pool,
+    ref ubyte[] buf,
+    size_t used,
+    size_t needed
+) @trusted nothrow
+{
+    if (buf.length >= needed)
+        return true;
+
+    size_t newCap = buf.length ? (buf.length * 2) : 4096;
+    if (newCap < needed)
+        newCap = needed;
+
+    auto newBuf = pool.acquire(newCap);
+    if (newBuf.ptr is null)
+        return false;
+
+    if (used)
+        newBuf[0 .. used] = buf[0 .. used];
+    if (buf.length)
+        pool.release(buf);
+    buf = newBuf;
+    return true;
+}
+
+private ChunkedReadStatus readChunkedBody(
+    TCPConnection conn,
+    BufferPool pool,
+    size_t maxTrailerBytes,
+    size_t maxBodyBytes,
+    ref ubyte[] outBuf,
+    ref size_t outLen
+) @trusted
+{
+    outLen = 0;
+
+    while (true)
+    {
+        ubyte[1024] lineBuf = void;
+        size_t lineLen = 0;
+        auto ls = readLineCRLF(conn, lineBuf, lineLen);
+        if (ls != ChunkedReadStatus.ok)
+            return ls;
+
+        size_t chunkSize = 0;
+        if (!parseChunkSizeLine(lineBuf[0 .. lineLen], chunkSize))
+            return ChunkedReadStatus.bad;
+
+        if (chunkSize == 0)
+        {
+            // Trailer-part: header fields terminated by an empty line.
+            // Empty trailer is a single CRLF immediately after the "0\r\n" line.
+            while (true)
+            {
+                ubyte[] chunk;
+                try { chunk = cast(ubyte[])conn.peek(); }
+                catch (Exception) { return ChunkedReadStatus.bad; }
+
+                if (chunk.length >= 2)
+                    break;
+
+                bool closed;
+                try { closed = conn.empty; }
+                catch (Exception) { return ChunkedReadStatus.bad; }
+                if (closed)
+                    return ChunkedReadStatus.clientClosed;
+
+                if (!conn.waitForData())
+                    return ChunkedReadStatus.timeout;
+            }
+
+            ubyte[] chunk2;
+            try { chunk2 = cast(ubyte[])conn.peek(); }
+            catch (Exception) { return ChunkedReadStatus.bad; }
+            if (chunk2.length >= 2 && chunk2[0] == '\r' && chunk2[1] == '\n')
+            {
+                try { conn.skip(2); }
+                catch (Exception) { return ChunkedReadStatus.bad; }
+                return ChunkedReadStatus.ok;
+            }
+
+            // Non-empty trailer: consume until CRLFCRLF.
+            return consumeUntilHeaderEnd(conn, maxTrailerBytes);
+        }
+
+        if (chunkSize > maxBodyBytes || outLen + chunkSize > maxBodyBytes)
+            return ChunkedReadStatus.tooLarge;
+
+        if (!ensureBodyCapacity(pool, outBuf, outLen, outLen + chunkSize))
+            return ChunkedReadStatus.bad;
+
+        auto rs = readExactFromConn(conn, outBuf[outLen .. outLen + chunkSize]);
+        if (rs != ChunkedReadStatus.ok)
+            return rs;
+        outLen += chunkSize;
+
+        ubyte[2] crlf = void;
+        rs = readExactFromConn(conn, crlf[]);
+        if (rs != ChunkedReadStatus.ok)
+            return rs;
+        if (crlf[0] != '\r' || crlf[1] != '\n')
+            return ChunkedReadStatus.bad;
+    }
 }
 
 // ============================================================================
@@ -1266,8 +1724,11 @@ final class Server
     
     private void processConnection(TCPConnection conn) @trusted
     {
+        immutable readTimeout = config.readTimeout;
+        immutable keepAliveTimeout = config.keepAliveTimeout;
+
         // Set timeouts
-        conn.readTimeout = config.readTimeout;
+        conn.readTimeout = readTimeout;
         
         // Cache config values locally for hot loop (avoid member access)
         immutable maxHeader = _maxHeaderSize;
@@ -1291,16 +1752,12 @@ final class Server
         
         uint requestCount = 0;
         
-        // Keep-alive loop
-        while (atomicLoad(running) && !atomicLoad(shuttingDown))
-        {
+	        // Keep-alive loop
+	        while (atomicLoad(running) && !atomicLoad(shuttingDown))
+	        {
             // Check max requests per connection
             if (maxRequests > 0 && requestCount >= maxRequests)
                 break;
-            
-            // Update timeout: first request uses readTimeout, subsequent use keepAliveTimeout
-            if (requestCount > 0)
-                conn.readTimeout = config.keepAliveTimeout;
             
             // Wait for data to be available first
             // This properly handles keep-alive: if client closes, we exit cleanly
@@ -1317,21 +1774,40 @@ final class Server
             // Now read the request
             size_t totalReceived = 0;
             size_t headerEndPos = 0;
-            
-            // Read until we have complete headers
-            readLoop: while (headerEndPos == 0 && totalReceived < maxHeader)
+            ubyte[] decodedBodyBuf;
+            size_t decodedBodyLen = 0;
+            bool restoreReadTimeout = (requestCount > 0);
+
+            scope(exit)
             {
+                if (decodedBodyBuf.length)
+                    pool.release(decodedBodyBuf);
+            }
+            
+            // Read until we have complete headers, without over-consuming pipelined bytes.
+            readLoop: while (headerEndPos == 0)
+            {
+                // Enforce header size limit independent of current buffer capacity.
+                if (totalReceived >= maxHeader)
+                {
+                    atomicOp!"+="(rejectedHeadersTooLarge, 1);
+                    sendErrorResponse(conn, 431, "Request Header Fields Too Large");
+                    drainForClose(conn, 50.msecs);
+                    return;
+                }
+
                 // Grow buffer if needed
                 if (totalReceived >= buffer.length)
                 {
-                    if (buffer.length >= maxHeader)
+                    // Grow buffer using pool
+                    auto newSize = fastMin(buffer.length * 2, cast(size_t)maxHeader);
+                    if (newSize <= buffer.length)
                     {
                         atomicOp!"+="(rejectedHeadersTooLarge, 1);
                         sendErrorResponse(conn, 431, "Request Header Fields Too Large");
+                        drainForClose(conn, 50.msecs);
                         return;
                     }
-                    // Grow buffer using pool
-                    auto newSize = fastMin(buffer.length * 2, cast(size_t)maxHeader);
                     auto newBuf = pool.acquire(newSize);
                     newBuf[0..totalReceived] = buffer[0..totalReceived];
                     pool.release(buffer);  // Return old buffer to pool
@@ -1364,16 +1840,34 @@ final class Server
                             if (totalReceived == 0)
                                 return;  // Clean timeout on keep-alive
                             atomicOp!"+="(rejectedTimeout, 1);
+                            sendErrorResponse(conn, 408, "Request Timeout");
                             return;
                         }
                         continue readLoop;
                     }
                     
-                    // Copy available data to buffer
-                    auto toCopy = fastMin(chunk.length, buffer.length - totalReceived);
+                    // Copy only up to header end, do not eat into body/pipelined requests.
+                    auto maxCopy = fastMin(chunk.length, buffer.length - totalReceived);
+                    auto headerRemaining = cast(size_t)maxHeader - totalReceived;
+                    if (maxCopy > headerRemaining)
+                        maxCopy = headerRemaining;
+
+                    auto need = findHeaderEnd(buffer[0..totalReceived], chunk[0..maxCopy]);
+                    auto toCopy = (need != 0) ? need : maxCopy;
+
                     buffer[totalReceived .. totalReceived + toCopy] = chunk[0 .. toCopy];
                     conn.skip(toCopy);
                     totalReceived += toCopy;
+
+                    // Once we've started receiving a request, apply the stricter per-request read timeout.
+                    if (restoreReadTimeout)
+                    {
+                        conn.readTimeout = readTimeout;
+                        restoreReadTimeout = false;
+                    }
+
+                    if (need != 0)
+                        headerEndPos = totalReceived;
                 }
                 catch (Exception)
                 {
@@ -1382,53 +1876,136 @@ final class Server
                     atomicOp!"+="(totalErrors, 1);
                     return;
                 }
-                
-                // Check for end of headers (\r\n\r\n) using optimized search
-                if (totalReceived >= 4)
-                {
-                    headerEndPos = findHeaderEnd(buffer[0..totalReceived]);
-                }
             }
             
             if (headerEndPos == 0)
             {
                 atomicOp!"+="(rejectedHeadersTooLarge, 1);
                 sendErrorResponse(conn, 431, "Request Header Fields Too Large");
+                drainForClose(conn, 50.msecs);
                 return;
             }
             
-            // Parse HTTP request
+            // Parse HTTP headers (body is handled separately for correct framing).
             HTTPRequest request;
             try
             {
-                request = HTTPRequest.parse(buffer[0..totalReceived]);
+                request = HTTPRequest.parse(buffer[0..headerEndPos]);
             }
             catch (Exception)
             {
                 sendErrorResponse(conn, 400, "Bad Request");
+                drainForClose(conn, 50.msecs);
                 break;
             }
 
             if (request.hasError())
             {
                 sendErrorResponse(conn, 400, "Bad Request");
+                drainForClose(conn, 50.msecs);
                 break;
             }
-            
-            // PHASE 1 T1.2: Check Content-Length against maxBodySize (@nogc)
-            auto contentLengthStr = request.getHeader("content-length");
-            if (contentLengthStr.length > 0)
+
+            // Read request body (Content-Length or Transfer-Encoding: chunked) before dispatch.
+            import aurora.http.util : parseContentLength;
+
+            bool isChunked = false;
+            auto te = trimWhitespace(request.getHeaderRaw("transfer-encoding"));
+            if (te.length)
             {
-                import aurora.http.util : parseContentLength;
-                auto contentLength = parseContentLength(contentLengthStr);
-                if (contentLength != size_t.max && contentLength > maxBody)
+                if (isChunkedOnly(te))
                 {
-                    atomicOp!"+="(rejectedBodyTooLarge, 1);
-                    sendErrorResponse(conn, 413, "Payload Too Large");
+                    isChunked = true;
+                }
+                else
+                {
+                    sendErrorResponse(conn, 501, "Unsupported Transfer-Encoding");
+                    drainForClose(conn, 50.msecs);
                     return;
                 }
             }
-            
+
+            size_t contentLength = 0;
+            auto clRaw = trimWhitespace(request.getHeaderRaw("content-length"));
+            if (!isChunked && clRaw.length)
+            {
+                auto cl = parseContentLength(clRaw);
+                if (cl == size_t.max)
+                {
+                    sendErrorResponse(conn, 400, "Bad Request");
+                    drainForClose(conn, 50.msecs);
+                    return;
+                }
+                contentLength = cl;
+                if (contentLength > maxBody)
+                {
+                    atomicOp!"+="(rejectedBodyTooLarge, 1);
+                    sendErrorResponse(conn, 413, "Payload Too Large");
+                    drainForClose(conn, 50.msecs);
+                    return;
+                }
+            }
+
+            if (isChunked)
+            {
+                auto status = readChunkedBody(conn, pool, maxHeader, maxBody,
+                    decodedBodyBuf, decodedBodyLen);
+                final switch (status)
+                {
+                    case ChunkedReadStatus.ok:
+                        request.setBodyRaw(decodedBodyBuf[0 .. decodedBodyLen]);
+                        break;
+                    case ChunkedReadStatus.timeout:
+                        atomicOp!"+="(rejectedTimeout, 1);
+                        sendErrorResponse(conn, 408, "Request Timeout");
+                        return;
+                    case ChunkedReadStatus.clientClosed:
+                        return;
+                    case ChunkedReadStatus.tooLarge:
+                        atomicOp!"+="(rejectedBodyTooLarge, 1);
+                        sendErrorResponse(conn, 413, "Payload Too Large");
+                        drainForClose(conn, 50.msecs);
+                        return;
+                    case ChunkedReadStatus.bad:
+                        sendErrorResponse(conn, 400, "Bad Request");
+                        drainForClose(conn, 50.msecs);
+                        return;
+                }
+            }
+            else if (contentLength > 0)
+            {
+                // Ensure buffer can hold headers + body contiguously.
+                auto needed = headerEndPos + contentLength;
+                if (needed > buffer.length)
+                {
+                    auto newBuf = pool.acquire(needed);
+                    newBuf[0 .. headerEndPos] = buffer[0 .. headerEndPos];
+                    pool.release(buffer);
+                    buffer = newBuf;
+                }
+
+                // Read exact Content-Length bytes without consuming pipelined bytes.
+                auto rs = readExactFromConn(conn, buffer[totalReceived .. needed]);
+                final switch (rs)
+                {
+                    case ChunkedReadStatus.ok:
+                        totalReceived = needed;
+                        request.setBodyRaw(buffer[headerEndPos .. needed]);
+                        break;
+                    case ChunkedReadStatus.timeout:
+                        atomicOp!"+="(rejectedTimeout, 1);
+                        sendErrorResponse(conn, 408, "Request Timeout");
+                        return;
+                    case ChunkedReadStatus.clientClosed:
+                        return;
+                    case ChunkedReadStatus.tooLarge:
+                        // Not possible for fixed Content-Length dest slice.
+                        return;
+                    case ChunkedReadStatus.bad:
+                        return;
+                }
+            }
+
             requestCount++;
             atomicOp!"+="(totalRequests, 1);
             
@@ -1452,11 +2029,12 @@ final class Server
             HTTPResponse response = HTTPResponse(200, "OK");
 
             // Determine keep-alive BEFORE handling (based on request)
-            auto connHeader = request.getHeader("connection");
+            auto connHeader = request.getHeaderRaw("connection");
+            auto httpVer = request.httpVersionRaw();
             bool keepAlive = true;
             if (connHeader == "close")
                 keepAlive = false;
-            else if (request.httpVersion() == "HTTP/1.0" && connHeader != "keep-alive")
+            else if (httpVer == "HTTP/1.0" && connHeader != "keep-alive")
                 keepAlive = false;
             
             // Force close on last allowed request (fixes off-by-one keep-alive bug)
@@ -1526,7 +2104,7 @@ final class Server
                 break;
 
             // Update timeout for keep-alive
-            conn.readTimeout = config.keepAliveTimeout;
+            conn.readTimeout = keepAliveTimeout;
         }
     }
     
@@ -1615,15 +2193,10 @@ final class Server
             }
             else
             {
-                // Very large response - still use heap but document it
-                auto heapBuf = new ubyte[estimatedSize + 1024];
-                auto len = response.buildInto(heapBuf);
-                if (len > 0)
-                {
-                    conn.write(heapBuf[0..len]);
-                    return true;
-                }
-                return false;
+                // Very large response - use non-pooled path (malloc/free) to avoid GC.
+                poolBuf = _tlsPool.acquire(estimatedSize + 1024);
+                if (poolBuf.ptr is null)
+                    return false;
             }
 
             scope(exit) _tlsPool.release(poolBuf);
