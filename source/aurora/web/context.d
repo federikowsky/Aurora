@@ -88,7 +88,27 @@ struct ContextStorage
             auto storedValue = cast(void*) cast(size_t) value;
         else
             auto storedValue = cast(void*) value;
-            
+
+        // ── F3: Search for existing key before appending (prevents GC overflow) ──
+        // Without this, every set() after the 4th call allocates on the GC heap.
+        for (uint i = 0; i < count && i < MAX_INLINE_VALUES; i++)
+        {
+            if (inlineEntries[i].key == key)
+            {
+                inlineEntries[i].value = storedValue;  // update in-place, no alloc
+                return;
+            }
+        }
+        foreach (ref entry; overflowEntries)
+        {
+            if (entry.key == key)
+            {
+                entry.value = storedValue;
+                return;
+            }
+        }
+
+        // Not found: append new entry
         if (count < MAX_INLINE_VALUES)
         {
             inlineEntries[count] = Entry(key, storedValue);

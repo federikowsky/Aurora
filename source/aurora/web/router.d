@@ -490,16 +490,44 @@ class Router
      */
     Match match(string method, string path)
     {
-        // Normalize path
-        path = normalizePath(path);
-
-        // Strip query string (@nogc - no indexOf allocation)
-        foreach (i, c; path)
+        // ── F1: Fast-path normalization (avoids allocation on clean paths) ──
+        // HTTP clients always send paths that start with '/'.
+        // Only call the allocating normalizePath() for truly malformed input.
+        if (path.length == 0)
         {
-            if (c == '?')
+            path = "/";
+        }
+        else
+        {
+            // Strip query string first (@nogc slice, no alloc)
+            foreach (i, c; path)
             {
-                path = path[0 .. i];  // Pure slice (no alloc)
-                break;
+                if (c == '?')
+                {
+                    path = path[0 .. i];
+                    break;
+                }
+            }
+
+            // Check if normalization is even needed
+            bool needsNormalize = (path[0] != '/');
+            if (!needsNormalize)
+            {
+                foreach (i; 0 .. cast(ptrdiff_t)path.length - 1)
+                    if (path[i] == '/' && path[i + 1] == '/')
+                    {
+                        needsNormalize = true;
+                        break;
+                    }
+            }
+
+            if (needsNormalize)
+            {
+                path = normalizePath(path);  // only for malformed paths (<1% of traffic)
+            }
+            else if (path.length > 1 && path[$ - 1] == '/')
+            {
+                path = path[0 .. $ - 1];  // trailing-slash removal: pure slice, no alloc
             }
         }
 

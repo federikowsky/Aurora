@@ -72,7 +72,37 @@ class LoggerMiddleware
     bool logBody = false;
     bool useColors = true;  // Enable ANSI colors
     string customFormat;
-    
+
+    // ── F6a: Per-second timestamp cache ──────────────────────────────────
+    // Clock.currTime() is a syscall + SysTime allocation. At 150k RPS each
+    // call is repeated 150k/sec. Cache the formatted string; regenerate only
+    // when the Unix second changes (~1 rebuild/sec instead of 150k/sec).
+    private long  _cachedSecond = -1;
+    private string _cachedTimestamp;
+
+    private string getTimestamp() nothrow
+    {
+        import core.stdc.time : time;
+        try
+        {
+            long sec = cast(long) time(null);   // cheap syscall, no allocation
+            if (sec == _cachedSecond) return _cachedTimestamp;
+            _cachedSecond = sec;
+            import std.datetime : Clock;
+            auto st = Clock.currTime();
+            import std.format : format;
+            _cachedTimestamp = format("%04d/%02d/%02d - %02d:%02d:%02d",
+                st.year, cast(int)st.month, st.day,
+                st.hour, st.minute, st.second);
+            return _cachedTimestamp;
+        }
+        catch (Exception)
+        {
+            return "0000/00/00 - 00:00:00";
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     private void delegate(string) logFunc;
     
     /**
@@ -188,7 +218,6 @@ class LoggerMiddleware
     void logRequest(string method, string path, int status, Duration duration)
     {
         import std.format : format;
-        import std.datetime : Clock;
         
         string logMsg;
         
@@ -199,27 +228,21 @@ class LoggerMiddleware
                 break;
                 
             case LogFormat.JSON:
-                import std.datetime : Clock;
-                auto now = Clock.currTime();
                 logMsg = format(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration_us":%d}`,
-                    now.toISOExtString(), method, path, status, duration.total!"usecs");
+                    getTimestamp(), method, path, status, duration.total!"usecs");
                 break;
                 
             case LogFormat.COLORED:
                 // Colored format:
                 // 2025/01/22 - 15:04:05 | 200 |    1.234ms | GET "/path"
-                auto now = Clock.currTime();
-                auto timestamp = format("%04d/%02d/%02d - %02d:%02d:%02d",
-                    now.year, now.month, now.day,
-                    now.hour, now.minute, now.second);
-                
+                // ── F6: cached timestamp, no Clock.currTime() per request ──
                 auto durationStr = formatDuration(duration);
                 auto reset = useColors ? Colors.RESET : "";
                 auto statusColor = getStatusColor(status);
                 auto methodColor = getMethodColor(method);
                 
                 logMsg = format("%s |%s %3d %s| %s |%s %-7s%s \"%s\"",
-                    timestamp,
+                    getTimestamp(),
                     statusColor,
                     status,
                     reset,

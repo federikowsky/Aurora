@@ -1028,10 +1028,11 @@ struct HTTPResponse
         // This reduces memcpy calls from 2*N to 1 (e.g., 16→1 for 8 headers)
         if (_headerCount > 0)
         {
-            ubyte[4096] headerBlock = void;  // Stack buffer for formatted headers
+            // ── F4: 2 KB is sufficient for 16 headers at ~100 bytes each ──
+            ubyte[2048] headerBlock = void;  // Stack buffer for formatted headers
 
             auto hdrLen = formatHeaderBlock(headerBlock[], _inlineHeaders[], _headerCount);
-            if (hdrLen == 0) return 0;  // Buffer too small (should never happen with 4KB)
+            if (hdrLen == 0) return 0;  // Buffer too small (should never happen with 2KB)
 
             // Single memcpy for all headers (instead of 2*N memcpy calls)
             if (pos + hdrLen > buffer.length) return 0;

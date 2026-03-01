@@ -2155,9 +2155,10 @@ final class Server
 
         try
         {
-            // Set Connection header - no hasHeader() check, just set it
-            // This is faster than AA lookup and handles the common case
-            response.setHeader("Connection", keepAlive ? "keep-alive" : "close");
+            // ── F5: HTTPResponse is pre-initialized with Connection: keep-alive.
+            // Only override when closing — avoids a full header scan on every response.
+            if (!keepAlive)
+                response.setHeader("Connection", "close");
 
             // ═══════════════════════════════════════════════════════════════
             // HOT PATH: Use provided reusable buffer (P1 optimization)
