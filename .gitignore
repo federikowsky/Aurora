@@ -64,3 +64,5 @@ benchmarks/results/
 data/
 
 CLAUDE.md
+.github/*
+report/*

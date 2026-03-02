@@ -1729,6 +1729,7 @@ final class Server
 
         // Set timeouts
         conn.readTimeout = readTimeout;
+        conn.tcpNoDelay = true;  // Disable Nagle — eliminate coalescing delay on keep-alive responses
         
         // Cache config values locally for hot loop (avoid member access)
         immutable maxHeader = _maxHeaderSize;
