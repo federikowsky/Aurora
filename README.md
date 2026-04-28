@@ -4,6 +4,7 @@
     <strong>High-Performance HTTP/1.1 Framework for D</strong>
   </p>
   <p align="center">
+    <a href="https://github.com/federikowsky/Aurora/actions/workflows/ci.yml"><img src="https://github.com/federikowsky/Aurora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
     <a href="https://dlang.org/"><img src="https://img.shields.io/badge/D-2.100+-red.svg" alt="D"></a>
     <a href="tests/"><img src="https://img.shields.io/badge/tests-38%20modules%20passing-brightgreen" alt="Tests"></a>
