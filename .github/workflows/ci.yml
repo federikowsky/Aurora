@@ -2,8 +2,6 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
@@ -30,9 +28,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS https://dlang.org/install.sh -o "$RUNNER_TEMP/install-dlang.sh"
-          bash "$RUNNER_TEMP/install-dlang.sh" install "${{ matrix.compiler }}" --activate > "$RUNNER_TEMP/activate-dlang"
-          echo "D_ACTIVATE=$(cat "$RUNNER_TEMP/activate-dlang")" >> "$GITHUB_ENV"
+          mkdir -p "$HOME/dlang"
+          curl -fsS https://dlang.org/install.sh -o "$HOME/dlang/install.sh"
+          activate_path=$(bash "$HOME/dlang/install.sh" install "${{ matrix.compiler }}" -a)
+          echo "D_ACTIVATE=$activate_path" >> "$GITHUB_ENV"
 
       - name: Show toolchain
         shell: bash
