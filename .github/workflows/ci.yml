@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dub:
+    name: DUB build and tests (LDC)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install D compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc
+
+      - name: Show toolchain
+        run: |
+          ldc2 --version
+          dub --version
+
+      - name: Build library
+        run: dub build --compiler=ldc2
+
+      - name: Build release library
+        run: dub build --compiler=ldc2 --build=release
+
+      - name: Run unit tests
+        run: dub test --compiler=ldc2 --config=unittest
