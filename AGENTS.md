@@ -111,7 +111,17 @@ If a command is unavailable because DUB, a D compiler, or platform dependencies 
 
 ## CI and workflow status
 
-No GitHub Actions workflow was observed during this bootstrap. Until CI is added, validation evidence should come from explicit local commands or other concrete tool output.
+The repository has a minimal GitHub Actions validation baseline in `.github/workflows/ci.yml`. It runs on pushes to `main`, pull requests targeting `main`, and manual dispatch.
+
+The baseline uses LDC on Ubuntu to:
+
+```bash
+dub build --compiler=ldc2
+dub build --compiler=ldc2 --build=release
+dub test --compiler=ldc2 --config=unittest
+```
+
+Treat these checks as the minimum required validation for changes that affect buildable code, DUB configuration, tests, or public exports. Add narrower or stronger checks for touched integration, benchmark, middleware, parser, routing, memory, WebSocket/SSE, or platform-runtime surfaces when relevant.
 
 ## Change discipline
 
@@ -119,5 +129,5 @@ No GitHub Actions workflow was observed during this bootstrap. Until CI is added
 - Keep documentation changes narrow and derived from observed files.
 - Preserve architecture boundaries unless the task explicitly requires changing them.
 - Avoid adding dependencies for marginal convenience.
-- Do not merge without explicit instruction.
-- Do not open pull requests unless explicitly requested.
+- Do not open pull requests unless branch protection, automation, or the task requires one.
+- Merge only when the task author has authorized integration and the relevant validation is satisfied or precisely bounded.
