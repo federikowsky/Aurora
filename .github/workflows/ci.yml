@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  dub:
+    name: ${{ matrix.compiler }} / ubuntu-latest
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - dmd
+          - ldc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install D compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS https://dlang.org/install.sh -o "$RUNNER_TEMP/install-dlang.sh"
+          bash "$RUNNER_TEMP/install-dlang.sh" install "${{ matrix.compiler }}" --activate > "$RUNNER_TEMP/activate-dlang"
+          echo "D_ACTIVATE=$(cat "$RUNNER_TEMP/activate-dlang")" >> "$GITHUB_ENV"
+
+      - name: Show toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$D_ACTIVATE"
+          dmd --version | head -1
+          dub --version
+
+      - name: Build library
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$D_ACTIVATE"
+          dub build
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$D_ACTIVATE"
+          dub test
