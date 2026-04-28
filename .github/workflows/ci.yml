@@ -29,6 +29,11 @@ jobs:
         with:
           compiler: ldc
 
+      - name: Install native link dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
+
       - name: Show toolchain
         run: |
           ldc2 --version
@@ -41,4 +46,6 @@ jobs:
         run: dub build --compiler=ldc2 --build=release
 
       - name: Run unit tests
+        env:
+          DFLAGS: -L/home/runner/.dub/packages/fastjsond/1.0.2/fastjsond/libfastjsond.a -L/home/runner/.dub/packages/wire/1.0.4/wire/libwire.a
         run: dub test --compiler=ldc2 --config=unittest
