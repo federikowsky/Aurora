@@ -46,4 +46,17 @@ jobs:
         run: dub build --compiler=ldc2 --build=release
 
       - name: Run unit tests
-        run: dub test --compiler=ldc2 --config=unittest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t native_libs < <(find "$HOME/.dub/packages" -type f \( -name 'libfastjsond.a' -o -name 'libwire.a' \) | sort)
+          if [ "${#native_libs[@]}" -ne 2 ]; then
+            printf 'Expected libfastjsond.a and libwire.a, found %d:\n' "${#native_libs[@]}" >&2
+            printf '%s\n' "${native_libs[@]}" >&2
+            exit 1
+          fi
+          link_flags=()
+          for lib in "${native_libs[@]}"; do
+            link_flags+=("-L${lib}")
+          done
+          DFLAGS="${link_flags[*]}" dub test --compiler=ldc2 --config=unittest
