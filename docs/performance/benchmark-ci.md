@@ -2,6 +2,8 @@
 
 Aurora keeps performance validation outside the runtime hot path. The CI performance workflow produces artifacts for latency, throughput, NUMA/memory-locality, and zero-copy/copy-budget review.
 
+Workflow triggers are `push` to `main` and `codex/**`, plus manual dispatch when available through the GitHub UI/API.
+
 ## Latency benchmark
 
 The latency workflow starts `benchmarks/server.d` in release mode and runs:
