@@ -1,0 +1,23 @@
+     Warning 
+     Warning ## Warning for package aurora, configuration unittest ##
+     Warning 
+     Warning The following compiler flags have been specified in the package description
+     Warning file. They are handled by DUB and direct use in packages is discouraged.
+     Warning Alternatively, you can set the DFLAGS environment variable to pass custom flags
+     Warning to the compiler, or use one of the suggestions below:
+     Warning 
+     Warning -unittest: Call dub with --build=unittest
+     Warning 
+     Warning 
+     Warning ## Warning for package aurora, configuration unittest-cov ##
+     Warning 
+     Warning The following compiler flags have been specified in the package description
+     Warning file. They are handled by DUB and direct use in packages is discouraged.
+     Warning Alternatively, you can set the DFLAGS environment variable to pass custom flags
+     Warning to the compiler, or use one of the suggestions below:
+     Warning 
+     Warning -unittest: Call dub with --build=unittest
+     Warning -cov: Call dub with --build=cov or --build=unittest-cov
+     Warning 
+    Starting Performing "release" build using ldc2 for x86_64.
+    Building aurora ~codex/perf-ci-hdr-numa-zero-copy: building configuration [library]

@@ -1,0 +1,455 @@
+{
+  "finding_count": 71,
+  "findings": [
+    {
+      "line": 420,
+      "path": "source/aurora/http/package.d",
+      "pattern": "to_string",
+      "text": "headers[\"Content-Length\"] = content.length.to!string;"
+    },
+    {
+      "line": 428,
+      "path": "source/aurora/http/package.d",
+      "pattern": "appender",
+      "text": "auto result = appender!string();"
+    },
+    {
+      "line": 432,
+      "path": "source/aurora/http/package.d",
+      "pattern": "to_string",
+      "text": "result ~= statusCode.to!string;"
+    },
+    {
+      "line": 180,
+      "path": "source/aurora/http/url.d",
+      "pattern": "dup_idup",
+      "text": "return input.idup;"
+    },
+    {
+      "line": 228,
+      "path": "source/aurora/http/url.d",
+      "pattern": "dup_idup",
+      "text": "return input.idup;"
+    },
+    {
+      "line": 315,
+      "path": "source/aurora/http/url.d",
+      "pattern": "dup_idup",
+      "text": "return DecodeResult(input.idup, true, null);"
+    },
+    {
+      "line": 322,
+      "path": "source/aurora/http/url.d",
+      "pattern": "gc_new",
+      "text": "char[] result = new char[input.length];"
+    },
+    {
+      "line": 398,
+      "path": "source/aurora/http/url.d",
+      "pattern": "string_concat",
+      "text": "return c == '-' || c == '.' || c == '_' || c == '~';"
+    },
+    {
+      "line": 181,
+      "path": "source/aurora/mem/arena.d",
+      "pattern": "string_concat",
+      "text": "~this()"
+    },
+    {
+      "line": 291,
+      "path": "source/aurora/mem/arena.d",
+      "pattern": "string_concat",
+      "text": "return (value + alignment - 1) & ~(alignment - 1);"
+    },
+    {
+      "line": 194,
+      "path": "source/aurora/mem/object_pool.d",
+      "pattern": "gc_new",
+      "text": "return new T();"
+    },
+    {
+      "line": 199,
+      "path": "source/aurora/mem/object_pool.d",
+      "pattern": "gc_new",
+      "text": "return new T();"
+    },
+    {
+      "line": 231,
+      "path": "source/aurora/mem/pool.d",
+      "pattern": "string_concat",
+      "text": "~this()"
+    },
+    {
+      "line": 603,
+      "path": "source/aurora/mem/pressure.d",
+      "pattern": "gc_new",
+      "text": "auto monitor = new MemoryMonitor();"
+    },
+    {
+      "line": 614,
+      "path": "source/aurora/mem/pressure.d",
+      "pattern": "gc_new",
+      "text": "auto monitor = new MemoryMonitor(config);"
+    },
+    {
+      "line": 624,
+      "path": "source/aurora/mem/pressure.d",
+      "pattern": "gc_new",
+      "text": "auto monitor = new MemoryMonitor();"
+    },
+    {
+      "line": 633,
+      "path": "source/aurora/mem/pressure.d",
+      "pattern": "gc_new",
+      "text": "auto monitor = new MemoryMonitor();"
+    },
+    {
+      "line": 647,
+      "path": "source/aurora/mem/pressure.d",
+      "pattern": "gc_new",
+      "text": "auto monitor = new MemoryMonitor(config);"
+    },
+    {
+      "line": 656,
+      "path": "source/aurora/mem/pressure.d",
+      "pattern": "gc_new",
+      "text": "auto monitor = new MemoryMonitor();"
+    },
+    {
+      "line": 668,
+      "path": "source/aurora/mem/pressure.d",
+      "pattern": "gc_new",
+      "text": "auto monitor = new MemoryMonitor();"
+    },
+    {
+      "line": 681,
+      "path": "source/aurora/mem/pressure.d",
+      "pattern": "gc_new",
+      "text": "auto monitor = new MemoryMonitor();"
+    },
+    {
+      "line": 206,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "auto heapBuf = new ubyte[body_.length + 512];"
+    },
+    {
+      "line": 233,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "auto body_ = `{\"error\":\"` ~ message ~ `\"}`;"
+    },
+    {
+      "line": 260,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "data = new ubyte[bufSize];"
+    },
+    {
+      "line": 417,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Exception handler cannot be null\");"
+    },
+    {
+      "line": 449,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Exception handler cannot be null\");"
+    },
+    {
+      "line": 492,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"onStart hook failed: \" ~ e.msg);"
+    },
+    {
+      "line": 492,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "throw new Exception(\"onStart hook failed: \" ~ e.msg);"
+    },
+    {
+      "line": 516,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Failed to start server: \" ~ e.msg);"
+    },
+    {
+      "line": 516,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "throw new Exception(\"Failed to start server: \" ~ e.msg);"
+    },
+    {
+      "line": 536,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "workerPool = new WorkerPool("
+    },
+    {
+      "line": 997,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"HTTP/1.1 503 Service Unavailable\\r\\n\" ~"
+    },
+    {
+      "line": 998,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"Content-Type: application/json\\r\\n\" ~"
+    },
+    {
+      "line": 999,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"Retry-After: %d\\r\\n\" ~"
+    },
+    {
+      "line": 1000,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"Connection: close\\r\\n\" ~"
+    },
+    {
+      "line": 1001,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"Content-Length: %d\\r\\n\" ~"
+    },
+    {
+      "line": 1026,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "if (_pool is null) _pool = new BufferPool();"
+    },
+    {
+      "line": 1205,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"HTTP/1.1 503 Service Unavailable\\r\\n\" ~"
+    },
+    {
+      "line": 1206,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"Content-Type: application/json\\r\\n\" ~"
+    },
+    {
+      "line": 1207,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"Retry-After: %d\\r\\n\" ~"
+    },
+    {
+      "line": 1208,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"Connection: close\\r\\n\" ~"
+    },
+    {
+      "line": 1209,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "\"Content-Length: %d\\r\\n\" ~"
+    },
+    {
+      "line": 1347,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "string_concat",
+      "text": "try { logError(\"Exception after hijack: \" ~ e.msg); } catch (Exception) {}"
+    },
+    {
+      "line": 1379,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "dup_idup",
+      "text": "return stackBuf[0..len].dup;"
+    },
+    {
+      "line": 1382,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "auto heapBuf = new ubyte[body_.length + 512];"
+    },
+    {
+      "line": 1387,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "dup_idup",
+      "text": "return cast(ubyte[])\"HTTP/1.1 500 Internal Server Error\\r\\nContent-Length: 0\\r\\n\\r\\n\".dup;"
+    },
+    {
+      "line": 1400,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "auto server = new Server(router, config);"
+    },
+    {
+      "line": 1407,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "auto server = new Server(router, config);"
+    },
+    {
+      "line": 1416,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "auto server = new Server(router, pipeline, config);"
+    },
+    {
+      "line": 1423,
+      "path": "source/aurora/runtime/server.d",
+      "pattern": "gc_new",
+      "text": "auto server = new Server(router, pipeline, config);"
+    },
+    {
+      "line": 297,
+      "path": "source/aurora/web/context.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Connection already hijacked\");"
+    },
+    {
+      "line": 299,
+      "path": "source/aurora/web/context.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Raw connection not available\");"
+    },
+    {
+      "line": 323,
+      "path": "source/aurora/web/context.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Connection already hijacked\");"
+    },
+    {
+      "line": 325,
+      "path": "source/aurora/web/context.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Raw connection not available\");"
+    },
+    {
+      "line": 361,
+      "path": "source/aurora/web/context.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Cannot set status: connection hijacked\");"
+    },
+    {
+      "line": 376,
+      "path": "source/aurora/web/context.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Cannot set header: connection hijacked\");"
+    },
+    {
+      "line": 391,
+      "path": "source/aurora/web/context.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Cannot send response: connection hijacked\");"
+    },
+    {
+      "line": 406,
+      "path": "source/aurora/web/context.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Cannot send JSON response: connection hijacked\");"
+    },
+    {
+      "line": 183,
+      "path": "source/aurora/web/router.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Handler cannot be null for route: \" ~ method ~ \" \" ~ path);"
+    },
+    {
+      "line": 183,
+      "path": "source/aurora/web/router.d",
+      "pattern": "string_concat",
+      "text": "throw new Exception(\"Handler cannot be null for route: \" ~ method ~ \" \" ~ path);"
+    },
+    {
+      "line": 192,
+      "path": "source/aurora/web/router.d",
+      "pattern": "gc_new",
+      "text": "methodTrees[method] = new RadixNode();"
+    },
+    {
+      "line": 216,
+      "path": "source/aurora/web/router.d",
+      "pattern": "string_concat",
+      "text": "addRoute(\"GET\", prefix ~ path, handler);"
+    },
+    {
+      "line": 221,
+      "path": "source/aurora/web/router.d",
+      "pattern": "string_concat",
+      "text": "addRoute(\"POST\", prefix ~ path, handler);"
+    },
+    {
+      "line": 226,
+      "path": "source/aurora/web/router.d",
+      "pattern": "string_concat",
+      "text": "addRoute(\"PUT\", prefix ~ path, handler);"
+    },
+    {
+      "line": 231,
+      "path": "source/aurora/web/router.d",
+      "pattern": "string_concat",
+      "text": "addRoute(\"DELETE\", prefix ~ path, handler);"
+    },
+    {
+      "line": 236,
+      "path": "source/aurora/web/router.d",
+      "pattern": "string_concat",
+      "text": "addRoute(\"PATCH\", prefix ~ path, handler);"
+    },
+    {
+      "line": 322,
+      "path": "source/aurora/web/router.d",
+      "pattern": "gc_new",
+      "text": "throw new Exception(\"Circular router reference detected\");"
+    },
+    {
+      "line": 355,
+      "path": "source/aurora/web/router.d",
+      "pattern": "string_concat",
+      "text": "includeRouter(subRouter, visited ~ other, nextAccumulatedPrefix);"
+    },
+    {
+      "line": 409,
+      "path": "source/aurora/web/router.d",
+      "pattern": "string_concat",
+      "text": "path = \"/\" ~ path;"
+    },
+    {
+      "line": 516,
+      "path": "source/aurora/web/router.d",
+      "pattern": "gc_new",
+      "text": "auto newNode = new RadixNode();"
+    },
+    {
+      "line": 629,
+      "path": "source/aurora/web/router.d",
+      "pattern": "string_concat",
+      "text": "childPath ~= \"/\" ~ child.prefix;"
+    }
+  ],
+  "mode": "report-only",
+  "patterns": [
+    "gc_new",
+    "dup_idup",
+    "array_materialize",
+    "string_concat",
+    "to_string",
+    "appender"
+  ],
+  "scanned_files": [
+    "source/aurora/http/form.d",
+    "source/aurora/http/package.d",
+    "source/aurora/http/url.d",
+    "source/aurora/http/util.d",
+    "source/aurora/mem/arena.d",
+    "source/aurora/mem/object_pool.d",
+    "source/aurora/mem/package.d",
+    "source/aurora/mem/pool.d",
+    "source/aurora/mem/pressure.d",
+    "source/aurora/runtime/server.d",
+    "source/aurora/web/context.d",
+    "source/aurora/web/router.d"
+  ],
+  "status": "pass"
+}
