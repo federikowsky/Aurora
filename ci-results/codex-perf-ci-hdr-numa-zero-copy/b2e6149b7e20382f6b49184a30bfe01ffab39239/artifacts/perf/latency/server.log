@@ -1,0 +1,100 @@
+    Starting Performing "release" build using /opt/hostedtoolcache/ldc2/1.42.0/x64/ldc2-1.42.0-linux-x86_64/bin/ldc2 for x86_64.
+    Building aurora-websocket 1.0.1: building configuration [library]
+    Building during 0.3.0: building configuration [default]
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(44,18): Deprecation: accessing `@system` field `SetupParameters.flags` will become `@system` in a future release
+    uring.payload.params.flags = flags;
+                 ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(83,18): Deprecation: accessing `@system` field `io_uring_probe.last_op` will become `@system` in a future release
+        if (op > probe.last_op) return false;
+                 ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(84,19): Deprecation: accessing `@system` field `io_uring_probe_op.op` will become `@system` in a future release
+        assert(ops[op].op == op, "Operations differs");
+                  ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(85,33): Deprecation: access `@system` variable `IO_URING_OP_SUPPORTED` will become `@system` in a future release
+        return (ops[op].flags & IO_URING_OP_SUPPORTED) != 0;
+                                ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(85,20): Deprecation: accessing `@system` field `io_uring_probe_op.flags` will become `@system` in a future release
+        return (ops[op].flags & IO_URING_OP_SUPPORTED) != 0;
+                   ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(829,5): Deprecation: accessing `@system` field `SubmissionEntry.opcode` will become `@system` in a future release
+    entry.opcode = op;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(830,5): Deprecation: accessing `@system` field `SubmissionEntry.fd` will become `@system` in a future release
+    entry.fd = fd;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(831,5): Deprecation: accessing `@system` field `SubmissionEntry.off` will become `@system` in a future release
+    entry.off = offset;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(832,5): Deprecation: accessing `@system` field `SubmissionEntry.flags` will become `@system` in a future release
+    entry.flags = SubmissionEntryFlags.NONE;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(833,5): Deprecation: accessing `@system` field `SubmissionEntry.ioprio` will become `@system` in a future release
+    entry.ioprio = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(834,5): Deprecation: accessing `@system` field `SubmissionEntry.addr` will become `@system` in a future release
+    entry.addr = cast(ulong)addr;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(835,5): Deprecation: accessing `@system` field `SubmissionEntry.len` will become `@system` in a future release
+    entry.len = len;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(836,5): Deprecation: accessing `@system` field `SubmissionEntry.rw_flags` will become `@system` in a future release
+    entry.rw_flags = ReadWriteFlags.NONE;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(837,2): Deprecation: accessing `@system` field `SubmissionEntry.user_data` will become `@system` in a future release
+    entry.user_data = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(838,5): Deprecation: accessing `@system` field `SubmissionEntry.buf_index` will become `@system` in a future release
+    entry.buf_index = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(839,5): Deprecation: accessing `@system` field `SubmissionEntry.personality` will become `@system` in a future release
+    entry.personality = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(840,5): Deprecation: accessing `@system` field `SubmissionEntry.file_index` will become `@system` in a future release
+    entry.file_index = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(841,5): Deprecation: accessing `@system` field `SubmissionEntry.__pad2` will become `@system` in a future release
+    entry.__pad2[0] = entry.__pad2[1] = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(841,5): Deprecation: accessing `@system` field `SubmissionEntry.__pad2` will become `@system` in a future release
+    entry.__pad2[0] = entry.__pad2[1] = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(841,5): Deprecation: accessing `@system` field `SubmissionEntry.__pad2` will become `@system` in a future release
+    entry.__pad2[0] = entry.__pad2[1] = 0;
+    ^
+22 deprecation warnings omitted, use `-verrors=0` to show all
+    Building taggedalgebraic 1.0.1: building configuration [library]
+    Building eventcore 0.9.39: building configuration [epoll]
+    Building fastjsond 1.0.2: building configuration [library]
+   Pre-build Running commands
+  Post-build Running commands
+    Building mir-core 1.7.4: building configuration [library]
+    Building mir-algorithm 3.22.4: building configuration [default]
+    Building unit-threaded:from 2.1.9: building configuration [library]
+    Building unit-threaded:exception 2.1.9: building configuration [library]
+    Building unit-threaded:assertions 2.1.9: building configuration [library]
+    Building unit-threaded:runner 2.1.9: building configuration [library]
+    Building unit-threaded:behave 2.1.9: building configuration [library]
+    Building unit-threaded:integration 2.1.9: building configuration [library]
+    Building unit-threaded:mocks 2.1.9: building configuration [library]
+    Building unit-threaded:property 2.1.9: building configuration [default]
+    Building unit-threaded 2.1.9: building configuration [library]
+    Building stdx-allocator 2.77.5: building configuration [library]
+    Building vibe-container 1.7.1: building configuration [library]
+    Building vibe-core 2.8.6: building configuration [epoll]
+    Building wire 1.0.4: building configuration [library]
+   Pre-build Running commands
+  Post-build Running commands
+    Building aurora ~codex/perf-ci-hdr-numa-zero-copy: building configuration [library]
+    Building aurora_benchmark ~master: building configuration [application]
+     Linking aurora_benchmark
+/usr/bin/ld: ../../../.dub/cache/wire/1.0.4/build/library-release-XSEYwxOKAvAaHy6YvW_w6w/libwire.a(wire.parser.o): in function `cb_on_headers_complete':
+parser.d:(.text.cb_on_headers_complete+0x1c): undefined reference to `llhttp_should_keep_alive'
+/usr/bin/ld: ../../../.dub/cache/wire/1.0.4/build/library-release-XSEYwxOKAvAaHy6YvW_w6w/libwire.a(wire.parser.o): in function `_D4wire6parser10ParserPool7acquireFNbNiZPSQBoQBm6Parser':
+parser.d:(.text._D4wire6parser10ParserPool7acquireFNbNiZPSQBoQBm6Parser+0x33): undefined reference to `llhttp_reset'
+/usr/bin/ld: parser.d:(.text._D4wire6parser10ParserPool7acquireFNbNiZPSQBoQBm6Parser+0x11e): undefined reference to `llhttp_init'
+/usr/bin/ld: ../../../.dub/cache/wire/1.0.4/build/library-release-XSEYwxOKAvAaHy6YvW_w6w/libwire.a(wire.parser.o): in function `_D4wire6parser9parseHTTPFNbNiAxhZSQBgQBe13ParserWrapper':
+parser.d:(.text._D4wire6parser9parseHTTPFNbNiAxhZSQBgQBe13ParserWrapper+0x23): undefined reference to `llhttp_execute'
+/usr/bin/ld: parser.d:(.text._D4wire6parser9parseHTTPFNbNiAxhZSQBgQBe13ParserWrapper+0x36): undefined reference to `llhttp_get_error_reason'
+collect2: error: ld returned 1 exit status
+Error: /usr/bin/cc failed with status: 1
+Error /opt/hostedtoolcache/ldc2/1.42.0/x64/ldc2-1.42.0-linux-x86_64/bin/ldc2 failed with exit code 1.

@@ -1,0 +1,150 @@
+     Warning 
+     Warning ## Warning for package aurora, configuration unittest ##
+     Warning 
+     Warning The following compiler flags have been specified in the package description
+     Warning file. They are handled by DUB and direct use in packages is discouraged.
+     Warning Alternatively, you can set the DFLAGS environment variable to pass custom flags
+     Warning to the compiler, or use one of the suggestions below:
+     Warning 
+     Warning -unittest: Call dub with --build=unittest
+     Warning 
+     Warning 
+     Warning ## Warning for package aurora, configuration unittest-cov ##
+     Warning 
+     Warning The following compiler flags have been specified in the package description
+     Warning file. They are handled by DUB and direct use in packages is discouraged.
+     Warning Alternatively, you can set the DFLAGS environment variable to pass custom flags
+     Warning to the compiler, or use one of the suggestions below:
+     Warning 
+     Warning -unittest: Call dub with --build=unittest
+     Warning -cov: Call dub with --build=cov or --build=unittest-cov
+     Warning 
+    Starting Performing "unittest" build using ldc2 for x86_64.
+    Building aurora-websocket 1.0.1: building configuration [library]
+    Building during 0.3.0: building configuration [default]
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(44,18): Deprecation: accessing `@system` field `SetupParameters.flags` will become `@system` in a future release
+    uring.payload.params.flags = flags;
+                 ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(83,18): Deprecation: accessing `@system` field `io_uring_probe.last_op` will become `@system` in a future release
+        if (op > probe.last_op) return false;
+                 ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(84,19): Deprecation: accessing `@system` field `io_uring_probe_op.op` will become `@system` in a future release
+        assert(ops[op].op == op, "Operations differs");
+                  ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(85,33): Deprecation: access `@system` variable `IO_URING_OP_SUPPORTED` will become `@system` in a future release
+        return (ops[op].flags & IO_URING_OP_SUPPORTED) != 0;
+                                ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(85,20): Deprecation: accessing `@system` field `io_uring_probe_op.flags` will become `@system` in a future release
+        return (ops[op].flags & IO_URING_OP_SUPPORTED) != 0;
+                   ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(829,5): Deprecation: accessing `@system` field `SubmissionEntry.opcode` will become `@system` in a future release
+    entry.opcode = op;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(830,5): Deprecation: accessing `@system` field `SubmissionEntry.fd` will become `@system` in a future release
+    entry.fd = fd;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(831,5): Deprecation: accessing `@system` field `SubmissionEntry.off` will become `@system` in a future release
+    entry.off = offset;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(832,5): Deprecation: accessing `@system` field `SubmissionEntry.flags` will become `@system` in a future release
+    entry.flags = SubmissionEntryFlags.NONE;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(833,5): Deprecation: accessing `@system` field `SubmissionEntry.ioprio` will become `@system` in a future release
+    entry.ioprio = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(834,5): Deprecation: accessing `@system` field `SubmissionEntry.addr` will become `@system` in a future release
+    entry.addr = cast(ulong)addr;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(835,5): Deprecation: accessing `@system` field `SubmissionEntry.len` will become `@system` in a future release
+    entry.len = len;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(836,5): Deprecation: accessing `@system` field `SubmissionEntry.rw_flags` will become `@system` in a future release
+    entry.rw_flags = ReadWriteFlags.NONE;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(837,2): Deprecation: accessing `@system` field `SubmissionEntry.user_data` will become `@system` in a future release
+    entry.user_data = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(838,5): Deprecation: accessing `@system` field `SubmissionEntry.buf_index` will become `@system` in a future release
+    entry.buf_index = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(839,5): Deprecation: accessing `@system` field `SubmissionEntry.personality` will become `@system` in a future release
+    entry.personality = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(840,5): Deprecation: accessing `@system` field `SubmissionEntry.file_index` will become `@system` in a future release
+    entry.file_index = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(841,5): Deprecation: accessing `@system` field `SubmissionEntry.__pad2` will become `@system` in a future release
+    entry.__pad2[0] = entry.__pad2[1] = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(841,5): Deprecation: accessing `@system` field `SubmissionEntry.__pad2` will become `@system` in a future release
+    entry.__pad2[0] = entry.__pad2[1] = 0;
+    ^
+../../../.dub/packages/during/0.3.0/during/source/during/package.d(841,5): Deprecation: accessing `@system` field `SubmissionEntry.__pad2` will become `@system` in a future release
+    entry.__pad2[0] = entry.__pad2[1] = 0;
+    ^
+22 deprecation warnings omitted, use `-verrors=0` to show all
+    Building taggedalgebraic 1.0.1: building configuration [library]
+    Building eventcore 0.9.39: building configuration [epoll]
+    Building fastjsond 1.0.2: building configuration [library]
+   Pre-build Running commands
+  Post-build Running commands
+    Building mir-core 1.7.4: building configuration [library]
+    Building mir-algorithm 3.22.4: building configuration [default]
+    Building unit-threaded:from 2.1.9: building configuration [library]
+    Building unit-threaded:exception 2.1.9: building configuration [library]
+    Building unit-threaded:assertions 2.1.9: building configuration [library]
+    Building unit-threaded:runner 2.1.9: building configuration [library]
+    Building unit-threaded:behave 2.1.9: building configuration [library]
+    Building unit-threaded:integration 2.1.9: building configuration [library]
+    Building unit-threaded:mocks 2.1.9: building configuration [library]
+    Building unit-threaded:property 2.1.9: building configuration [default]
+    Building unit-threaded 2.1.9: building configuration [library]
+    Building stdx-allocator 2.77.5: building configuration [library]
+    Building vibe-container 1.7.1: building configuration [library]
+    Building vibe-core 2.8.6: building configuration [epoll]
+    Building wire 1.0.4: building configuration [library]
+   Pre-build Running commands
+  Post-build Running commands
+    Building aurora ~codex/perf-ci-hdr-numa-zero-copy: building configuration [unittest]
+     Linking aurora
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.document.o): in function `_D9fastjsond8document8Document6__dtorMFNbNiZv':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/document.d:55:(.text._D9fastjsond8document8Document6__dtorMFNbNiZv+0x1a): undefined reference to `fj_document_free'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.document.o): in function `_D9fastjsond8document8Document4rootMFNbNiZSQBp5value5Value':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/document.d:112:(.text._D9fastjsond8document8Document4rootMFNbNiZSQBp5value5Value+0x69): undefined reference to `fj_document_root'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.parser.o): in function `_D9fastjsond6parser6Parser6createFNbNiZSQBmQBfQBb':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/parser.d:52:(.text._D9fastjsond6parser6Parser6createFNbNiZSQBmQBfQBb+0x23): undefined reference to `fj_parser_new'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.parser.o): in function `_D9fastjsond6parser6Parser6__dtorMFNbNiZv':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/parser.d:59:(.text._D9fastjsond6parser6Parser6__dtorMFNbNiZv+0x1a): undefined reference to `fj_parser_free'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.parser.o): in function `_D9fastjsond6parser6Parser8opAssignMFNbNcNiNjNkMSQBvQBoQBkZQl':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/parser.d:70:(.text._D9fastjsond6parser6Parser8opAssignMFNbNcNiNjNkMSQBvQBoQBkZQl+0x1e): undefined reference to `fj_parser_free'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.parser.o): in function `_D9fastjsond6parser6Parser5parseMFNbNiAxaZSQBp8document8Document':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/parser.d:103:(.text._D9fastjsond6parser6Parser5parseMFNbNiAxaZSQBp8document8Document+0x75): undefined reference to `fj_parser_parse'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.value.o): in function `_D9fastjsond5value5Value7tryBoolMFNbNiZSQBm5types__T6ResultTbZQk':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:165:(.text._D9fastjsond5value5Value7tryBoolMFNbNiZSQBm5types__T6ResultTbZQk+0x1b): undefined reference to `fj_value_get_bool'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.value.o): in function `_D9fastjsond5value5Value6tryIntMFNbNiZSQBl5types__T6ResultTlZQk':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:174:(.text._D9fastjsond5value5Value6tryIntMFNbNiZSQBl5types__T6ResultTlZQk+0x1f): undefined reference to `fj_value_get_int64'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.value.o): in function `_D9fastjsond5value5Value9tryStringMFNbNiZSQBo5types__T6ResultTAxaZQm':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:202:(.text._D9fastjsond5value5Value9tryStringMFNbNiZSQBo5types__T6ResultTAxaZQm+0x30): undefined reference to `fj_value_get_string'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.value.o): in function `_D9fastjsond5value5Value7opIndexMFAxaZSQBlQBeQBb':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:228:(.text._D9fastjsond5value5Value7opIndexMFAxaZSQBlQBeQBb+0x66): undefined reference to `fj_value_get_field'
+/usr/bin/ld: /home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:230:(.text._D9fastjsond5value5Value7opIndexMFAxaZSQBlQBeQBb+0x87): undefined reference to `fj_value_get_field_len'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.value.o): in function `_D9fastjsond5value5Value6hasKeyMFNbNiAxaZb':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:246:(.text._D9fastjsond5value5Value6hasKeyMFNbNiAxaZb+0x46): undefined reference to `fj_value_has_field'
+/usr/bin/ld: /home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:252:(.text._D9fastjsond5value5Value6hasKeyMFNbNiAxaZb+0x71): undefined reference to `fj_value_get_field_len'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.value.o): in function `_D9fastjsond5value5Value7opIndexMFmZSQBjQBcQz':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:279:(.text._D9fastjsond5value5Value7opIndexMFmZSQBjQBcQz+0x26): undefined reference to `fj_value_get_index'
+/usr/bin/ld: ../../../.dub/cache/fastjsond/1.0.2/build/library-unittest-DlTjTFJrDjF9gbljXFOwcg/libfastjsond.a(fastjsond.value.o): in function `_D9fastjsond5value5Value6lengthMFNbNiZm':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:291:(.text._D9fastjsond5value5Value6lengthMFNbNiZm+0x23): undefined reference to `fj_value_array_size'
+/usr/bin/ld: /home/runner/work/Aurora/Aurora/../../../.dub/packages/fastjsond/1.0.2/fastjsond/source/fastjsond/value.d:296:(.text._D9fastjsond5value5Value6lengthMFNbNiZm+0x49): undefined reference to `fj_value_object_size'
+/usr/bin/ld: ../../../.dub/cache/wire/1.0.4/build/library-unittest-m2Sx_k87_q-2xdymDxXUbA/libwire.a(wire.parser.o): in function `_D4wire6parser6Parser5setupMFNbNiPSQBhQBfQBbZv':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/wire/1.0.4/wire/source/wire/parser.d:41:(.text._D4wire6parser6Parser5setupMFNbNiPSQBhQBfQBbZv+0xde): undefined reference to `llhttp_init'
+/usr/bin/ld: ../../../.dub/cache/wire/1.0.4/build/library-unittest-m2Sx_k87_q-2xdymDxXUbA/libwire.a(wire.parser.o): in function `cb_on_headers_complete':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/wire/1.0.4/wire/source/wire/parser.d:173:(.text.cb_on_headers_complete+0x39): undefined reference to `llhttp_should_keep_alive'
+/usr/bin/ld: ../../../.dub/cache/wire/1.0.4/build/library-unittest-m2Sx_k87_q-2xdymDxXUbA/libwire.a(wire.parser.o): in function `_D4wire6parser6Parser5resetMFNbNiPSQBhQBfQBbZv':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/wire/1.0.4/wire/source/wire/parser.d:49:(.text._D4wire6parser6Parser5resetMFNbNiPSQBhQBfQBbZv+0x14): undefined reference to `llhttp_reset'
+/usr/bin/ld: ../../../.dub/cache/wire/1.0.4/build/library-unittest-m2Sx_k87_q-2xdymDxXUbA/libwire.a(wire.parser.o): in function `_D4wire6parser9parseHTTPFNbNiAxhZSQBgQBe13ParserWrapper':
+/home/runner/work/Aurora/Aurora/../../../.dub/packages/wire/1.0.4/wire/source/wire/parser.d:277:(.text._D4wire6parser9parseHTTPFNbNiAxhZSQBgQBe13ParserWrapper+0x31): undefined reference to `llhttp_execute'
+/usr/bin/ld: /home/runner/work/Aurora/Aurora/../../../.dub/packages/wire/1.0.4/wire/source/wire/parser.d:281:(.text._D4wire6parser9parseHTTPFNbNiAxhZSQBgQBe13ParserWrapper+0x5b): undefined reference to `llhttp_get_error_reason'
+collect2: error: ld returned 1 exit status
+Error: /usr/bin/cc failed with status: 1
+Error ldc2 failed with exit code 1.

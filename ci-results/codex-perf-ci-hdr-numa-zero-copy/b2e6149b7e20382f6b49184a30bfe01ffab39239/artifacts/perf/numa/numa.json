@@ -1,0 +1,26 @@
+{
+  "numa_nodes": [
+    0
+  ],
+  "numactl": "/usr/bin/numactl",
+  "parameters": {
+    "cpu_node": 0,
+    "local_mem_node": 0,
+    "passes": 2,
+    "remote_mem_node": 1,
+    "size_mib": 32,
+    "stride": 64,
+    "threads": 1
+  },
+  "platform": "Linux-6.17.0-1010-azure-x86_64-with-glibc2.39",
+  "python": "3.12.3",
+  "reason": "less-than-two-numa-nodes",
+  "results": [
+    {
+      "reason": "less-than-two-numa-nodes",
+      "scenario": "numa",
+      "status": "skipped"
+    }
+  ],
+  "status": "skipped"
+}
