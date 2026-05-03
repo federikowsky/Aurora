@@ -1,4 +1,4 @@
 Temporary marker for running validate-candidate.yml on main.
 Candidate branch: codex/perf-ci-hdr-numa-zero-copy
-Candidate SHA: 7960d2b5f05104986ee7fa9d43dd2440a36aec8e
-Trigger: 2026-05-03T07:51:00Z
+Candidate SHA: 40b9177357309c0134275f8b091372280aeb9db6
+Trigger: 2026-05-03T08:03:00Z
