@@ -1,0 +1,7 @@
+{
+  "status": "skipped",
+  "reason": "less-than-two-numa-nodes",
+  "nodes": [
+    0
+  ]
+}

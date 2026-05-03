@@ -1,0 +1,2 @@
+scenario,status,bandwidth_mib_s,ns_per_access,threads,size_mib,stride,reason
+numa,skipped,,,,,,less-than-two-numa-nodes
