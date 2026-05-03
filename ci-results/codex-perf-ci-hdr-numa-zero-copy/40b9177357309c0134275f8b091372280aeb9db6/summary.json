@@ -1,47 +1,7 @@
 {
-  "checks": [
-    {
-      "exit_code": 0,
-      "name": "copy_budget",
-      "status": "pass"
-    },
-    {
-      "exit_code": 2,
-      "name": "dub_build",
-      "status": "fail"
-    },
-    {
-      "exit_code": 2,
-      "name": "dub_release",
-      "status": "fail"
-    },
-    {
-      "exit_code": 2,
-      "name": "dub_unittest",
-      "status": "fail"
-    },
-    {
-      "exit_code": 1,
-      "name": "perf_latency",
-      "status": "fail"
-    },
-    {
-      "exit_code": 0,
-      "name": "perf_numa",
-      "status": "pass"
-    },
-    {
-      "exit_code": 0,
-      "name": "toolchain",
-      "status": "pass"
-    }
-  ],
-  "metadata": {
-    "run_attempt": "1",
-    "run_id": "25273607858",
-    "runner_os": "Linux",
-    "source_branch": "codex/perf-ci-hdr-numa-zero-copy",
-    "source_sha": "40b9177357309c0134275f8b091372280aeb9db6"
-  },
-  "overall_status": "fail"
+  "candidate_ref": "codex/perf-ci-hdr-numa-zero-copy",
+  "candidate_sha": "40b9177357309c0134275f8b091372280aeb9db6",
+  "overall_status": "fail",
+  "runner_os": "Linux",
+  "run_id": "25273643657"
 }
