@@ -25,6 +25,11 @@ jobs:
         with:
           compiler: ldc
 
+      - name: Install Linux link dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libc++-dev libc++abi-dev
+
       - name: Validate and publish result branch
         shell: bash
         run: |
@@ -66,11 +71,11 @@ jobs:
           cat >"$RAW_DIR/summary.md" <<EOF
           # Aurora Candidate Validation
 
-          - Candidate ref: \\`$CANDIDATE_REF\\`
-          - Candidate SHA: \\`$CANDIDATE_SHA\\`
-          - Overall: \\`$overall_status\\`
-          - Runner: \\`$RUNNER_OS\\`
-          - Run ID: \\`$GITHUB_RUN_ID\\`
+          - Candidate ref: $CANDIDATE_REF
+          - Candidate SHA: $CANDIDATE_SHA
+          - Overall: $overall_status
+          - Runner: $RUNNER_OS
+          - Run ID: $GITHUB_RUN_ID
 
           | Check | Status | Exit |
           | --- | --- | ---: |
