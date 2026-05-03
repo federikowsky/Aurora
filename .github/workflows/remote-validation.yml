@@ -29,6 +29,11 @@ jobs:
         with:
           compiler: ldc
 
+      - name: Install Linux link dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libc++-dev libc++abi-dev
+
       - name: Run validation and publish observable results
         shell: bash
         run: |
@@ -98,9 +103,10 @@ jobs:
           (root / "summary.md").write_text("\n".join(lines) + "\n")
           PY
 
-          VALIDATION_STATUS=$(python3 - <<'PY'
+          VALIDATION_STATUS=$(python3 - "$RAW_DIR/summary.json" <<'PY'
           import json
-          print(json.load(open("$RUNNER_TEMP/aurora-validation-result/summary.json"))["overall_status"])
+          import sys
+          print(json.load(open(sys.argv[1]))["overall_status"])
           PY
           )
 
