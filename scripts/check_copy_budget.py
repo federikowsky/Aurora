@@ -63,7 +63,7 @@ def is_ignored(line: str) -> bool:
         or stripped.startswith("//")
         or stripped.startswith("*")
         or stripped.startswith("/+")
-        or stripped.startswith("+/" )
+        or stripped.startswith("+/")
         or stripped.startswith("import ")
         or stripped.startswith("module ")
         or "copy-budget: allow" in stripped
@@ -112,7 +112,8 @@ def write_outputs(out_dir: Path, findings: list[Finding], scanned_files: list[Pa
     if findings:
         lines.extend(["## Findings", "", "| Path | Line | Pattern | Text |", "| --- | ---: | --- | --- |"])
         for finding in findings[:200]:
-            lines.append(f"| `{finding.path}` | {finding.line} | `{finding.pattern}` | `{finding.text.replace('|', '\\|')}` |")
+            safe_text = finding.text.replace("|", "\\|")
+            lines.append(f"| `{finding.path}` | {finding.line} | `{finding.pattern}` | `{safe_text}` |")
         if len(findings) > 200:
             lines.append("\n_Only first 200 findings shown; full data is in JSON/CSV._")
     else:
