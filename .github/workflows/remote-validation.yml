@@ -1,0 +1,126 @@
+name: Remote Validation
+
+on:
+  push:
+    branches: ["codex/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: remote-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-validation:
+    name: Linux validation with repo-published results
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install D compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc
+
+      - name: Run validation and publish observable results
+        shell: bash
+        run: |
+          set +euo pipefail
+
+          SOURCE_BRANCH="${GITHUB_REF_NAME}"
+          SAFE_BRANCH="${SOURCE_BRANCH//\//-}"
+          RESULT_BRANCH="ci-results/${SAFE_BRANCH}"
+          RESULT_ROOT="ci-results/${SAFE_BRANCH}/${GITHUB_SHA}"
+          WORK_ROOT="$PWD"
+          RAW_DIR="$RUNNER_TEMP/aurora-validation-result"
+          mkdir -p "$RAW_DIR/logs" "$RAW_DIR/perf"
+
+          run_and_capture() {
+            local name="$1"
+            shift
+            echo "::group::$name"
+            "$@" >"$RAW_DIR/logs/${name}.log" 2>&1
+            local code=$?
+            cat "$RAW_DIR/logs/${name}.log"
+            echo "::endgroup::"
+            echo "$code" >"$RAW_DIR/logs/${name}.exit"
+            return 0
+          }
+
+          echo "source_branch=${SOURCE_BRANCH}" >"$RAW_DIR/metadata.env"
+          echo "source_sha=${GITHUB_SHA}" >>"$RAW_DIR/metadata.env"
+          echo "runner_os=${RUNNER_OS}" >>"$RAW_DIR/metadata.env"
+          echo "run_id=${GITHUB_RUN_ID}" >>"$RAW_DIR/metadata.env"
+          echo "run_attempt=${GITHUB_RUN_ATTEMPT}" >>"$RAW_DIR/metadata.env"
+
+          run_and_capture toolchain bash -lc 'ldc2 --version && dub --version && python3 --version && uname -a'
+          run_and_capture dub_build dub build --compiler=ldc2
+          run_and_capture dub_release dub build --compiler=ldc2 --build=release
+          run_and_capture dub_unittest dub test --compiler=ldc2 --config=unittest
+          run_and_capture perf_latency bash scripts/run_latency_benchmark_ci.sh
+          run_and_capture perf_numa python3 benchmarks/numa/numa_locality.py --out-dir artifacts/perf/numa --threads 1 --size-mib 32 --stride 64 --passes 2
+          run_and_capture copy_budget python3 scripts/check_copy_budget.py --out-dir artifacts/perf/copy-budget
+
+          mkdir -p "$RAW_DIR/artifacts"
+          if [[ -d artifacts/perf ]]; then
+            cp -R artifacts/perf "$RAW_DIR/artifacts/perf"
+          fi
+
+          python3 - "$RAW_DIR" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          checks = []
+          for exit_file in sorted((root / "logs").glob("*.exit")):
+              name = exit_file.stem
+              code = int(exit_file.read_text().strip() or "1")
+              checks.append({"name": name, "exit_code": code, "status": "pass" if code == 0 else "fail"})
+          overall = "pass" if checks and all(item["exit_code"] == 0 for item in checks) else "fail"
+          metadata = {}
+          for line in (root / "metadata.env").read_text().splitlines():
+              if "=" in line:
+                  key, value = line.split("=", 1)
+                  metadata[key] = value
+          summary = {"overall_status": overall, "checks": checks, "metadata": metadata}
+          (root / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+          lines = ["# Aurora Remote Validation", "", f"- Overall: `{overall}`", "", "| Check | Status | Exit |", "| --- | --- | ---: |"]
+          for item in checks:
+              lines.append(f"| {item['name']} | {item['status']} | {item['exit_code']} |")
+          (root / "summary.md").write_text("\n".join(lines) + "\n")
+          PY
+
+          VALIDATION_STATUS=$(python3 - <<'PY'
+          import json
+          print(json.load(open("$RUNNER_TEMP/aurora-validation-result/summary.json"))["overall_status"])
+          PY
+          )
+
+          cd "$WORK_ROOT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$RESULT_BRANCH" >/dev/null 2>&1
+          if git show-ref --verify --quiet "refs/remotes/origin/$RESULT_BRANCH"; then
+            git checkout -B "$RESULT_BRANCH" "origin/$RESULT_BRANCH"
+          else
+            git checkout --orphan "$RESULT_BRANCH"
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          mkdir -p "$RESULT_ROOT"
+          cp -R "$RAW_DIR"/* "$RESULT_ROOT"/
+          git add "$RESULT_ROOT"
+          git commit -m "ci-results: ${SOURCE_BRANCH} ${GITHUB_SHA}" >/dev/null 2>&1 || true
+          git push origin "$RESULT_BRANCH"
+
+          if [[ "$VALIDATION_STATUS" != "pass" ]]; then
+            exit 1
+          fi
