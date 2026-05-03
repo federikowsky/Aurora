@@ -1,0 +1,47 @@
+{
+  "checks": [
+    {
+      "exit_code": 0,
+      "name": "copy_budget",
+      "status": "pass"
+    },
+    {
+      "exit_code": 0,
+      "name": "dub_build",
+      "status": "pass"
+    },
+    {
+      "exit_code": 0,
+      "name": "dub_release",
+      "status": "pass"
+    },
+    {
+      "exit_code": 2,
+      "name": "dub_unittest",
+      "status": "fail"
+    },
+    {
+      "exit_code": 1,
+      "name": "perf_latency",
+      "status": "fail"
+    },
+    {
+      "exit_code": 0,
+      "name": "perf_numa",
+      "status": "pass"
+    },
+    {
+      "exit_code": 0,
+      "name": "toolchain",
+      "status": "pass"
+    }
+  ],
+  "metadata": {
+    "run_attempt": "1",
+    "run_id": "25273461944",
+    "runner_os": "Linux",
+    "source_branch": "codex/perf-ci-hdr-numa-zero-copy",
+    "source_sha": "9fa4c6b7f237c8231cf1b7cfa49616c48c5665a2"
+  },
+  "overall_status": "fail"
+}
