@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "mode": "absolute-sanity-with-documented-relative-baseline",
+  "relative_guard_enabled": false,
+  "note": "Initial CI baseline mode. Relative p99/p999 regression checks are reported but not enforced until stable runner history exists. Absolute sanity guards fail only on clear benchmark/server malfunction.",
+  "baseline": {
+    "p99_us": 250000.0,
+    "p999_us": 500000.0,
+    "throughput_rps": 100.0
+  },
+  "absolute_guard": {
+    "p99_us_max": 1000000.0,
+    "p999_us_max": 2000000.0,
+    "throughput_rps_min": 10.0
+  }
+}
