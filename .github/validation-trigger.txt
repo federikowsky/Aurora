@@ -1,0 +1,3 @@
+Temporary marker for running validate-candidate.yml on main.
+Candidate branch: codex/perf-ci-hdr-numa-zero-copy
+Date: 2026-05-03
