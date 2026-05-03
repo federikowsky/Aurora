@@ -2,7 +2,7 @@ LDC - the LLVM D compiler (1.42.0):
   based on DMD v2.112.1 and LLVM 21.1.8
   built with LDC - the LLVM D compiler (1.42.0)
   Default target: x86_64-unknown-linux-gnu
-  Host CPU: icelake-server
+  Host CPU: znver4
   https://dlang.org - https://wiki.dlang.org/LDC
 
 
