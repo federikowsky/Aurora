@@ -22,6 +22,15 @@
     "libs-osx": [
         "c++"
     ],
+    "preBuildCommands-posix": [
+        "mkdir -p build/deps",
+        "cp $(find $HOME/.dub/packages -path '*/wire/*/wire/libwire.a' | head -n 1) build/deps/libwire.a",
+        "cp $(find $HOME/.dub/packages -path '*/fastjsond/*/fastjsond/libfastjsond.a' | head -n 1) build/deps/libfastjsond.a"
+    ],
+    "lflags-posix": [
+        "build/deps/libwire.a",
+        "build/deps/libfastjsond.a"
+    ],
     "importPaths": [
         "source"
     ],
