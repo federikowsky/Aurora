@@ -1,0 +1,63 @@
+name: Performance Reports
+
+on:
+  push:
+    branches: [main, "codex/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  performance-reports:
+    name: Latency, NUMA, and copy-budget reports
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install D compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc
+
+      - name: Show toolchain
+        run: |
+          ldc2 --version
+          dub --version
+          python3 --version
+          uname -a
+
+      - name: Run latency benchmark with HDR artifacts
+        run: |
+          chmod +x scripts/run_latency_benchmark_ci.sh
+          scripts/run_latency_benchmark_ci.sh
+
+      - name: Run NUMA / memory-locality report
+        if: always()
+        run: |
+          python3 benchmarks/numa/numa_locality.py \
+            --out-dir artifacts/perf/numa \
+            --threads 1 \
+            --size-mib 32 \
+            --stride 64 \
+            --passes 2
+
+      - name: Run zero-copy / copy-budget static report
+        if: always()
+        run: |
+          python3 scripts/check_copy_budget.py --out-dir artifacts/perf/copy-budget
+
+      - name: Upload performance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-performance-reports-${{ github.sha }}
+          path: artifacts/perf/**
+          if-no-files-found: error
