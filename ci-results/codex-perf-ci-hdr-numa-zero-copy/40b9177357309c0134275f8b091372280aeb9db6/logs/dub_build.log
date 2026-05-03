@@ -1,0 +1,38 @@
+    Fetching vibe-container 1.7.1 (getting selected version)
+    Fetching mir-algorithm 3.22.4 (getting selected version)
+    Fetching fastjsond 1.0.2 (getting selected version)
+    Fetching during 0.3.0 (getting selected version)
+    Fetching unit-threaded 2.1.9 (getting selected version)
+    Fetching taggedalgebraic 1.0.1 (getting selected version)
+    Fetching stdx-allocator 2.77.5 (getting selected version)
+    Fetching eventcore 0.9.39 (getting selected version)
+    Fetching mir-core 1.7.4 (getting selected version)
+    Fetching wire 1.0.4 (getting selected version)
+    Fetching silly 1.1.1 (getting selected version)
+    Fetching aurora-websocket 1.0.1 (getting selected version)
+    Fetching vibe-core 2.8.6 (getting selected version)
+     Warning 
+     Warning ## Warning for package aurora, configuration unittest ##
+     Warning 
+     Warning The following compiler flags have been specified in the package description
+     Warning file. They are handled by DUB and direct use in packages is discouraged.
+     Warning Alternatively, you can set the DFLAGS environment variable to pass custom flags
+     Warning to the compiler, or use one of the suggestions below:
+     Warning 
+     Warning -unittest: Call dub with --build=unittest
+     Warning 
+     Warning 
+     Warning ## Warning for package aurora, configuration unittest-cov ##
+     Warning 
+     Warning The following compiler flags have been specified in the package description
+     Warning file. They are handled by DUB and direct use in packages is discouraged.
+     Warning Alternatively, you can set the DFLAGS environment variable to pass custom flags
+     Warning to the compiler, or use one of the suggestions below:
+     Warning 
+     Warning -unittest: Call dub with --build=unittest
+     Warning -cov: Call dub with --build=cov or --build=unittest-cov
+     Warning 
+    Starting Performing "debug" build using ldc2 for x86_64.
+    Building aurora ~codex/perf-ci-hdr-numa-zero-copy: building configuration [library]
+   Pre-build Running commands
+Error Invalid variable: 
