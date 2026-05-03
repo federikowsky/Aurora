@@ -2,7 +2,7 @@
 
 Aurora keeps performance validation outside the runtime hot path. The CI performance workflow produces artifacts for latency, throughput, NUMA/memory-locality, and zero-copy/copy-budget review.
 
-Workflow triggers are `push` to `main` and `codex/**`, plus manual dispatch when available through the GitHub UI/API.
+Workflow triggers are `push` to `main` and `codex/**`, plus manual dispatch when available through the GitHub UI/API. On Ubuntu runners, executable-link validation installs the C++ runtime development packages required by the existing DUB link configuration.
 
 ## Latency benchmark
 
