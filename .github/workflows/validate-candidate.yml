@@ -1,0 +1,104 @@
+name: Validate Candidate Branch
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-codex-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          ref: codex/perf-ci-hdr-numa-zero-copy
+          fetch-depth: 0
+
+      - name: Install D compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc
+
+      - name: Validate and publish result branch
+        shell: bash
+        run: |
+          set +e
+          CANDIDATE_REF="codex/perf-ci-hdr-numa-zero-copy"
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          RESULT_BRANCH="ci-results/codex-perf-ci-hdr-numa-zero-copy"
+          RESULT_ROOT="ci-results/codex-perf-ci-hdr-numa-zero-copy/${CANDIDATE_SHA}"
+          RAW_DIR="$RUNNER_TEMP/aurora-candidate-validation"
+          mkdir -p "$RAW_DIR/logs"
+          overall=0
+          rows=""
+
+          run_check() {
+            name="$1"
+            shift
+            echo "::group::$name"
+            "$@" >"$RAW_DIR/logs/${name}.log" 2>&1
+            code=$?
+            cat "$RAW_DIR/logs/${name}.log"
+            echo "::endgroup::"
+            echo "$code" >"$RAW_DIR/logs/${name}.exit"
+            if [ "$code" -eq 0 ]; then status="pass"; else status="fail"; overall=1; fi
+            rows="${rows}| ${name} | ${status} | ${code} |\n"
+          }
+
+          run_check toolchain bash -lc 'ldc2 --version && dub --version && python3 --version && uname -a'
+          run_check dub_build dub build --compiler=ldc2
+          run_check dub_release dub build --compiler=ldc2 --build=release
+          run_check dub_unittest dub test --compiler=ldc2 --config=unittest
+          run_check perf_latency bash scripts/run_latency_benchmark_ci.sh
+          run_check perf_numa python3 benchmarks/numa/numa_locality.py --out-dir artifacts/perf/numa --threads 1 --size-mib 32 --stride 64 --passes 2
+          run_check copy_budget python3 scripts/check_copy_budget.py --out-dir artifacts/perf/copy-budget
+
+          if [ "$overall" -eq 0 ]; then overall_status="pass"; else overall_status="fail"; fi
+          mkdir -p "$RAW_DIR/artifacts"
+          if [ -d artifacts/perf ]; then cp -R artifacts/perf "$RAW_DIR/artifacts/perf"; fi
+
+          cat >"$RAW_DIR/summary.md" <<EOF
+          # Aurora Candidate Validation
+
+          - Candidate ref: \\`$CANDIDATE_REF\\`
+          - Candidate SHA: \\`$CANDIDATE_SHA\\`
+          - Overall: \\`$overall_status\\`
+          - Runner: \\`$RUNNER_OS\\`
+          - Run ID: \\`$GITHUB_RUN_ID\\`
+
+          | Check | Status | Exit |
+          | --- | --- | ---: |
+          $(printf "$rows")
+          EOF
+
+          cat >"$RAW_DIR/summary.json" <<EOF
+          {
+            "candidate_ref": "$CANDIDATE_REF",
+            "candidate_sha": "$CANDIDATE_SHA",
+            "overall_status": "$overall_status",
+            "runner_os": "$RUNNER_OS",
+            "run_id": "$GITHUB_RUN_ID"
+          }
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$RESULT_BRANCH" >/dev/null 2>&1
+          if git show-ref --verify --quiet "refs/remotes/origin/$RESULT_BRANCH"; then
+            git checkout -B "$RESULT_BRANCH" "origin/$RESULT_BRANCH"
+          else
+            git checkout --orphan "$RESULT_BRANCH"
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+          mkdir -p "$RESULT_ROOT"
+          cp -R "$RAW_DIR"/* "$RESULT_ROOT"/
+          git add "$RESULT_ROOT"
+          git commit -m "ci-results: candidate ${CANDIDATE_SHA}" >/dev/null 2>&1 || true
+          git push origin "$RESULT_BRANCH"
+          exit "$overall"
