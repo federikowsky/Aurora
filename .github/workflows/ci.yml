@@ -29,6 +29,11 @@ jobs:
         with:
           compiler: ldc
 
+      - name: Install C++ runtime link dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libc++-dev libc++abi-dev
+
       - name: Show toolchain
         run: |
           ldc2 --version
