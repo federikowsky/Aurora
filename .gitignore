@@ -1,6 +1,5 @@
 # Build artifacts
 .dub/
-dub.selections.json
 *.o
 *.obj
 *.a

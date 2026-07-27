@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [main]
@@ -17,28 +20,54 @@ concurrency:
 jobs:
   dub:
     name: DUB build and unit tests (LDC)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      DUB_HOME: ${{ github.workspace }}/.ci-home
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Capture runner context
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/ci
+          uname -a | tee artifacts/ci/uname.txt
+          lscpu | tee artifacts/ci/lscpu.txt
+          free -h | tee artifacts/ci/memory.txt
 
       - name: Install D compiler
         uses: dlang-community/setup-dlang@v2
         with:
-          compiler: ldc
+          compiler: ldc-1.42.0
 
       - name: Show toolchain
         run: |
-          ldc2 --version
-          dub --version
+          set -o pipefail
+          ldc2 --version 2>&1 | tee artifacts/ci/ldc.txt
+          dub --version 2>&1 | tee artifacts/ci/dub.txt
+          c++ --version 2>&1 | tee artifacts/ci/cxx.txt
 
       - name: Build library
-        run: dub build --compiler=ldc2
+        run: |
+          set -o pipefail
+          HOME="$DUB_HOME" dub build --compiler=ldc2 2>&1 | tee artifacts/ci/build-debug.log
 
       - name: Build release library
-        run: dub build --compiler=ldc2 --build=release
+        run: |
+          set -o pipefail
+          HOME="$DUB_HOME" dub build --compiler=ldc2 --build=release 2>&1 | tee artifacts/ci/build-release.log
 
       - name: Run unit tests
-        run: dub test --compiler=ldc2 --config=unittest
+        run: |
+          set -o pipefail
+          HOME="$DUB_HOME" dub test --compiler=ldc2 --config=unittest 2>&1 | tee artifacts/ci/unit-tests.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-linux-${{ github.sha }}
+          path: artifacts/ci
+          if-no-files-found: error

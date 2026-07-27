@@ -13,8 +13,14 @@
         "mir-algorithm": "~>3.22.0",
         "unit-threaded": "~>2.1.9",
         "aurora-websocket": "~>1.0.0",
-        "wire": "~>1.0.1",
-        "fastjsond": "~>1.0.2"
+        "wire": {
+            "repository": "git+https://github.com/federikowsky/Wire.git",
+            "version": "82b6a5dfd606ebe2ac15c83d9430abdb58aec09b"
+        },
+        "fastjsond": {
+            "repository": "git+https://github.com/federikowsky/Fastjsond.git",
+            "version": "23a51d692103a0b77cba153afa2994df0c14f4d3"
+        }
     },
     "libs-linux": [
         "stdc++"

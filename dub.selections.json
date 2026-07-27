@@ -1,0 +1,18 @@
+{
+	"fileVersion": 1,
+	"versions": {
+		"aurora-websocket": "1.0.1",
+		"during": "0.3.0",
+		"eventcore": "0.9.39",
+		"fastjsond": {"version":"23a51d692103a0b77cba153afa2994df0c14f4d3","repository":"git+https://github.com/federikowsky/Fastjsond.git"},
+		"mir-algorithm": "3.22.4",
+		"mir-core": "1.7.4",
+		"silly": "1.1.1",
+		"stdx-allocator": "2.77.5",
+		"taggedalgebraic": "1.0.1",
+		"unit-threaded": "2.1.9",
+		"vibe-container": "1.7.1",
+		"vibe-core": "2.8.6",
+		"wire": {"version":"82b6a5dfd606ebe2ac15c83d9430abdb58aec09b","repository":"git+https://github.com/federikowsky/Wire.git"}
+	}
+}
