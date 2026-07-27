@@ -18,7 +18,9 @@ module aurora.runtime.server;
 
 // vibe-core networking
 import vibe.core.net : listenTCP, TCPListener, TCPConnection, TCPListenOptions;
-import vibe.core.core : runTask, runEventLoop, exitEventLoop, yield;
+import vibe.core.core : runTask, runEventLoop, exitEventLoop, yield,
+                        createLeanTimer, Timer;
+import vibe.core.task : Task, InterruptException;
 import vibe.core.log : logInfo, logWarn, logError, logDebug;
 
 // Aurora modules
@@ -747,20 +749,111 @@ struct ServerConfig
 // RESPONSE WRITER (Fiber-compatible)
 // ============================================================================
 
+private final class SocketWriteTimeoutException : Exception
+{
+    this() @safe nothrow
+    {
+        super("Socket write timed out");
+    }
+}
+
+/**
+ * Reusable per-connection write deadline.
+ *
+ * `TCPConnection.write()` is interruptible but has no timeout property.
+ * A lean event-loop timer interrupts the owning task, which in turn makes
+ * vibe-core cancel the pending socket write. The timer is created once per
+ * connection and rearmed without a D-GC allocation for each response.
+ */
+private struct WriteDeadline
+{
+    private static struct InterruptOwner
+    {
+        bool* expired;
+        Task owner;
+
+        void opCall() @safe nothrow
+        {
+            *expired = true;
+            owner.interrupt();
+        }
+    }
+
+    private Duration timeout = Duration.max;
+    private Timer timer;
+    private bool expired;
+
+    void initialize(Duration configuredTimeout) @trusted nothrow
+    {
+        timeout = configuredTimeout;
+        if (timeout < Duration.max)
+        {
+            auto owner = Task.getThis();
+            if (owner)
+            {
+                InterruptOwner callback = { &expired, owner };
+                timer = createLeanTimer(callback);
+            }
+        }
+    }
+
+    void write(T)(TCPConnection conn, scope const(T)[] data) @trusted
+        if (is(T == ubyte) || is(T == char))
+    {
+        if (data.length == 0)
+            return;
+
+        if (!timer || timeout == Duration.max)
+        {
+            conn.write(data);
+            return;
+        }
+
+        expired = false;
+        timer.rearm(timeout);
+        scope(exit) timer.stop();
+
+        try
+        {
+            conn.write(data);
+        }
+        catch (InterruptException interrupt)
+        {
+            if (expired)
+                throw new SocketWriteTimeoutException();
+            throw interrupt;
+        }
+    }
+}
+
 /// Response writer that writes directly to TCPConnection
 struct ResponseWriter
 {
     private TCPConnection conn;
     private bool headersSent;
     private shared(bool)* shutdownFlag;  // Reference to server shutdown flag
+    private WriteDeadline* writeDeadline;
     
     @disable this();
     
-    this(TCPConnection c, shared(bool)* shutdown = null) @safe nothrow
+    this(
+        TCPConnection c,
+        shared(bool)* shutdown = null,
+        WriteDeadline* deadline = null
+    ) @safe nothrow
     {
         conn = c;
         headersSent = false;
         shutdownFlag = shutdown;
+        writeDeadline = deadline;
+    }
+
+    private void writeBytes(scope const(ubyte)[] data) @trusted
+    {
+        if (writeDeadline !is null)
+            writeDeadline.write(conn, data);
+        else
+            conn.write(data);
     }
     
     /// Write a complete HTTP response
@@ -779,7 +872,7 @@ struct ResponseWriter
                                          cast(string)body_, keepAlive);
             if (len > 0)
             {
-                conn.write(stackBuf[0..len]);
+                writeBytes(stackBuf[0..len]);
                 return;
             }
         }
@@ -789,7 +882,7 @@ struct ResponseWriter
         auto len = buildResponseInto(heapBuf, statusCode, contentType,
                                      cast(string)body_, keepAlive);
         if (len > 0)
-            conn.write(heapBuf[0..len]);
+            writeBytes(heapBuf[0..len]);
     }
     
     /// Write a complete HTTP response (string version)
@@ -815,7 +908,7 @@ struct ResponseWriter
             auto body_ = `{"error":"` ~ message ~ `"}`;
             auto len = buildResponseInto(buf[], statusCode, "application/json", body_, keepAlive);
             if (len > 0)
-                conn.write(buf[0..len]);
+                writeBytes(buf[0..len]);
         }
         catch (Exception) {}
     }
@@ -832,6 +925,12 @@ struct ResponseBuffer
 {
     private ubyte[] data;
     private bool built;
+    private bool keepAlive = true;
+
+    this(bool keepAlive) @safe nothrow
+    {
+        this.keepAlive = keepAlive;
+    }
     
     void write(int statusCode, string contentType, const(ubyte)[] body_) @trusted
     {
@@ -841,7 +940,13 @@ struct ResponseBuffer
         auto bufSize = body_.length + 512;
         data = new ubyte[bufSize];
         
-        auto len = buildResponseInto(data, statusCode, contentType, cast(string)body_, true);
+        auto len = buildResponseInto(
+            data,
+            statusCode,
+            contentType,
+            cast(string)body_,
+            keepAlive
+        );
         
         if (len > 0)
             data = data[0..len];
@@ -1586,7 +1691,9 @@ final class Server
                 body503.length,
                 body503
             );
-            conn.write(cast(const(ubyte)[])response);
+            WriteDeadline deadline;
+            deadline.initialize(config.writeTimeout);
+            deadline.write(conn, cast(const(ubyte)[])response);
         }
         catch (Exception) 
         {
@@ -1598,6 +1705,8 @@ final class Server
     {
         // Set timeouts
         conn.readTimeout = config.readTimeout;
+        WriteDeadline writeDeadline;
+        writeDeadline.initialize(config.writeTimeout);
         
         auto maxHeader = config.maxHeaderSize;
         auto maxBody = config.maxBodySize;
@@ -1651,7 +1760,11 @@ final class Server
                     if (buffer.length >= maxRequestSize)
                     {
                         atomicOp!"+="(rejectedBodyTooLarge, 1);
-                        auto writer = ResponseWriter(conn, &shuttingDown);
+                        auto writer = ResponseWriter(
+                            conn,
+                            &shuttingDown,
+                            &writeDeadline
+                        );
                         writer.writeError(413, "Payload Too Large");
                         return;
                     }
@@ -1663,7 +1776,11 @@ final class Server
                     if (newBuf.ptr is null)
                     {
                         atomicOp!"+="(totalErrors, 1);
-                        auto writer = ResponseWriter(conn, &shuttingDown);
+                        auto writer = ResponseWriter(
+                            conn,
+                            &shuttingDown,
+                            &writeDeadline
+                        );
                         writer.writeError(500, "Internal Server Error");
                         return;
                     }
@@ -1717,7 +1834,11 @@ final class Server
                 case FrameStatus.headerTooLarge:
                 {
                     atomicOp!"+="(rejectedHeadersTooLarge, 1);
-                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    auto writer = ResponseWriter(
+                        conn,
+                        &shuttingDown,
+                        &writeDeadline
+                    );
                     writer.writeError(431, "Request Header Fields Too Large");
                     return;
                 }
@@ -1725,14 +1846,22 @@ final class Server
                 case FrameStatus.bodyTooLarge:
                 {
                     atomicOp!"+="(rejectedBodyTooLarge, 1);
-                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    auto writer = ResponseWriter(
+                        conn,
+                        &shuttingDown,
+                        &writeDeadline
+                    );
                     writer.writeError(413, "Payload Too Large");
                     return;
                 }
 
                 case FrameStatus.badRequest:
                 {
-                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    auto writer = ResponseWriter(
+                        conn,
+                        &shuttingDown,
+                        &writeDeadline
+                    );
                     writer.writeError(400, "Bad Request");
                     return;
                 }
@@ -1752,14 +1881,22 @@ final class Server
             }
             catch (Exception)
             {
-                auto writer = ResponseWriter(conn, &shuttingDown);
+                auto writer = ResponseWriter(
+                    conn,
+                    &shuttingDown,
+                    &writeDeadline
+                );
                 writer.writeError(400, "Bad Request");
                 break;
             }
             
             if (request.hasError() || !request.isComplete())
             {
-                auto writer = ResponseWriter(conn, &shuttingDown);
+                auto writer = ResponseWriter(
+                    conn,
+                    &shuttingDown,
+                    &writeDeadline
+                );
                 writer.writeError(400, "Bad Request");
                 break;
             }
@@ -1771,7 +1908,11 @@ final class Server
                 );
                 if (decodedBody.ptr is null)
                 {
-                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    auto writer = ResponseWriter(
+                        conn,
+                        &shuttingDown,
+                        &writeDeadline
+                    );
                     writer.writeError(400, "Bad Request");
                     break;
                 }
@@ -1788,7 +1929,11 @@ final class Server
                     if (contentLength > maxBody)
                     {
                         atomicOp!"+="(rejectedBodyTooLarge, 1);
-                        auto writer = ResponseWriter(conn, &shuttingDown);
+                        auto writer = ResponseWriter(
+                            conn,
+                            &shuttingDown,
+                            &writeDeadline
+                        );
                         writer.writeError(413, "Payload Too Large");
                         return;
                     }
@@ -1798,6 +1943,14 @@ final class Server
             
             requestCount++;
             atomicOp!"+="(totalRequests, 1);
+
+            // Decide connection lifetime before building the response so the
+            // wire-level header matches what the server will actually do.
+            bool keepAlive = request.shouldKeepAlive();
+            if (maxRequests > 0 && requestCount >= maxRequests)
+                keepAlive = false;
+            if (!atomicLoad(running) || atomicLoad(shuttingDown))
+                keepAlive = false;
             
             // === IN-FLIGHT REQUEST LIMIT CHECK ===
             if (config.maxInFlightRequests > 0)
@@ -1808,7 +1961,11 @@ final class Server
                 if (inFlight > config.maxInFlightRequests)
                 {
                     atomicOp!"+="(rejectedInFlight, 1);
-                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    auto writer = ResponseWriter(
+                        conn,
+                        &shuttingDown,
+                        &writeDeadline
+                    );
                     try
                     {
                         import std.format : format;
@@ -1824,7 +1981,15 @@ final class Server
                             body429.length,
                             body429
                         );
-                        conn.write(cast(const(ubyte)[])response);
+                        writeDeadline.write(
+                            conn,
+                            cast(const(ubyte)[])response
+                        );
+                    }
+                    catch (SocketWriteTimeoutException)
+                    {
+                        atomicOp!"+="(rejectedTimeout, 1);
+                        atomicOp!"+="(totalErrors, 1);
                     }
                     catch (Exception) {}
                     return;
@@ -1838,7 +2003,7 @@ final class Server
             if (handler !is null)
             {
                 // Simple handler mode
-                auto respBuffer = ResponseBuffer();
+                auto respBuffer = ResponseBuffer(keepAlive);
                 try
                 {
                     handler(&request, respBuffer);
@@ -1851,7 +2016,7 @@ final class Server
             }
             else if (router !is null)
             {
-                auto result = handleWithRouter(&request, conn);
+                auto result = handleWithRouter(&request, conn, keepAlive);
                 responseData = result.data;
                 wasHijacked = result.hijacked;
             }
@@ -1869,7 +2034,13 @@ final class Server
             {
                 try
                 {
-                    conn.write(responseData);
+                    writeDeadline.write(conn, responseData);
+                }
+                catch (SocketWriteTimeoutException)
+                {
+                    atomicOp!"+="(rejectedTimeout, 1);
+                    atomicOp!"+="(totalErrors, 1);
+                    return;
                 }
                 catch (Exception)
                 {
@@ -1878,11 +2049,7 @@ final class Server
                 }
             }
             
-            // Check keep-alive
-            auto connHeader = request.getHeader("connection");
-            if (connHeader == "close")
-                break;
-            if (request.httpVersion() == "HTTP/1.0" && connHeader != "keep-alive")
+            if (!keepAlive)
                 break;
 
             auto remaining = buffered - frame.messageLength;
@@ -1909,7 +2076,11 @@ final class Server
         bool hijacked;
     }
     
-    private RouterResult handleWithRouter(HTTPRequest* request, TCPConnection conn) @trusted
+    private RouterResult handleWithRouter(
+        HTTPRequest* request,
+        TCPConnection conn,
+        bool keepAlive
+    ) @trusted
     {
         Context ctx;
         ctx.request = request;
@@ -1923,7 +2094,12 @@ final class Server
             // Execute onRequest hooks
             _hooks.executeOnRequest(ctx);
             
-            auto result = router.match(request.method(), request.path());
+            // These borrowed views remain valid while the request buffer is
+            // retained by processConnection. Router matching is read-only.
+            auto result = router.match(
+                cast(string)request.methodRaw(),
+                cast(string)request.pathRaw()
+            );
             
             if (result.found && result.handler !is null)
             {
@@ -1957,8 +2133,12 @@ final class Server
             // Execute onResponse hooks
             _hooks.executeOnResponse(ctx);
             
-            auto respData = buildResponse(response.status, 
-                response.getContentType(), response.getBody());
+            auto respData = buildResponse(
+                response.status,
+                response.getContentType(),
+                response.getBody(),
+                keepAlive
+            );
             return RouterResult(respData, false);
         }
         catch (Exception e)
@@ -1978,33 +2158,61 @@ final class Server
                 handleException(ctx, e);
                 // Handler executed - return the response it set
                 _hooks.executeOnResponse(ctx);
-                auto respData = buildResponse(response.status, 
-                    response.getContentType(), response.getBody());
+                auto respData = buildResponse(
+                    response.status,
+                    response.getContentType(),
+                    response.getBody(),
+                    keepAlive
+                );
                 return RouterResult(respData, false);
             }
             catch (Exception)
             {
                 // No handler found or handler failed - return 500
-                return RouterResult(buildResponse(500, "application/json", 
-                    `{"error":"Internal Server Error"}`), false);
+                return RouterResult(
+                    buildResponse(
+                        500,
+                        "application/json",
+                        `{"error":"Internal Server Error"}`,
+                        keepAlive
+                    ),
+                    false
+                );
             }
         }
     }
     
-    private ubyte[] buildResponse(int status, string contentType, string body_) @trusted
+    private ubyte[] buildResponse(
+        int status,
+        string contentType,
+        string body_,
+        bool keepAlive
+    ) @trusted
     {
         enum STACK_SIZE = 4096;
         
         if (body_.length + 256 <= STACK_SIZE)
         {
             ubyte[STACK_SIZE] stackBuf;
-            auto len = buildResponseInto(stackBuf[], status, contentType, body_, true);
+            auto len = buildResponseInto(
+                stackBuf[],
+                status,
+                contentType,
+                body_,
+                keepAlive
+            );
             if (len > 0)
                 return stackBuf[0..len].dup;
         }
         
         auto heapBuf = new ubyte[body_.length + 512];
-        auto len = buildResponseInto(heapBuf, status, contentType, body_, true);
+        auto len = buildResponseInto(
+            heapBuf,
+            status,
+            contentType,
+            body_,
+            keepAlive
+        );
         if (len > 0)
             return heapBuf[0..len];
         

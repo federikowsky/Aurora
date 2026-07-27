@@ -89,6 +89,30 @@ unittest
     params.count.shouldEqual(2);
 }
 
+@("failed deep parameter branch does not leak overflow parameters")
+unittest
+{
+    auto router = new Router();
+
+    void deepHandler(ref Context ctx) { }
+    void fallbackHandler(ref Context ctx) { }
+
+    router.addRoute(
+        "GET",
+        "/files/:p1/:p2/:p3/:p4/:p5/expected",
+        &deepHandler
+    );
+    router.addRoute("GET", "/files/*rest", &fallbackHandler);
+
+    auto match = router.match("GET", "/files/1/2/3/4/5/other");
+
+    match.found.shouldBeTrue;
+    match.handler.shouldEqual(&fallbackHandler);
+    match.params["rest"].shouldEqual("1/2/3/4/5/other");
+    match.params["p5"].shouldBeNull;
+    match.params.count.shouldEqual(1);
+}
+
 // ========================================
 // HAPPY PATH - REGISTRATION
 // ========================================

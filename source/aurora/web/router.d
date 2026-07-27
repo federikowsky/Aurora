@@ -107,6 +107,34 @@ struct PathParams
         }
         count++;
     }
+
+    /**
+     * Restore a previous logical size after route backtracking.
+     *
+     * Shrinking the slice is required in addition to restoring `count`,
+     * otherwise lookups can still observe stale overflow entries.
+     */
+    package(aurora) void truncate(uint newCount) @safe nothrow @nogc
+    {
+        assert(newCount <= count);
+
+        auto oldInlineCount = count < MAX_INLINE_PARAMS
+            ? count
+            : MAX_INLINE_PARAMS;
+        auto newInlineCount = newCount < MAX_INLINE_PARAMS
+            ? newCount
+            : MAX_INLINE_PARAMS;
+        foreach (i; newInlineCount .. oldInlineCount)
+            inlineParams[i] = Param.init;
+
+        auto newOverflowLength = newCount > MAX_INLINE_PARAMS
+            ? newCount - MAX_INLINE_PARAMS
+            : 0;
+        if (overflowParams.length > newOverflowLength)
+            overflowParams = overflowParams[0 .. newOverflowLength];
+
+        count = newCount;
+    }
 }
 
 /**
@@ -578,7 +606,7 @@ class Router
                         return child.handler;
                     }
                     // Rollback: no handler found, try next child
-                    params.count = savedCount;
+                    params.truncate(savedCount);
                 }
                 else
                 {
@@ -591,7 +619,7 @@ class Router
                         return result;
                     }
                     // Rollback: recursion failed, remove param we added
-                    params.count = savedCount;
+                    params.truncate(savedCount);
                 }
             }
         }

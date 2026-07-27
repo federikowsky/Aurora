@@ -61,7 +61,7 @@
             ],
             "mainSourceFile": "tests/runner.d",
             "excludedSourceFiles": [
-                
+                "tests/integration/protocol_probe_server.d",
                 "tests/realworld/*",
                 "tests/stress/*"
             ],
@@ -88,7 +88,7 @@
             ],
             "mainSourceFile": "tests/runner.d",
             "excludedSourceFiles": [
-                
+                "tests/integration/protocol_probe_server.d",
                 "tests/realworld/*",
                 "tests/stress/*"
             ],

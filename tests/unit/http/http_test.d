@@ -43,6 +43,50 @@ unittest
     req.query.shouldEqual("q=test&limit=10");
 }
 
+@("raw method and path accessors borrow the request buffer")
+unittest
+{
+    auto rawRequest = cast(ubyte[])(
+        "GET /users?q=test HTTP/1.1\r\nHost: localhost\r\n\r\n"
+    ).dup;
+    auto req = HTTPRequest.parse(rawRequest);
+
+    auto method = req.methodRaw();
+    auto path = req.pathRaw();
+
+    method.shouldEqual("GET");
+    path.shouldEqual("/users");
+
+    auto bufferStart = cast(size_t)rawRequest.ptr;
+    auto bufferEnd = bufferStart + rawRequest.length;
+    auto methodAddress = cast(size_t)method.ptr;
+    auto pathAddress = cast(size_t)path.ptr;
+    assert(methodAddress >= bufferStart && methodAddress < bufferEnd);
+    assert(pathAddress >= bufferStart && pathAddress < bufferEnd);
+}
+
+@("raw method and path accessors allocate zero D-GC bytes")
+unittest
+{
+    import core.memory : GC;
+
+    auto rawRequest = cast(ubyte[])(
+        "GET /users HTTP/1.1\r\nHost: localhost\r\n\r\n"
+    ).dup;
+    auto req = HTTPRequest.parse(rawRequest);
+
+    auto allocationBefore = GC.allocatedInCurrentThread();
+    foreach (_; 0 .. 10_000)
+    {
+        auto method = req.methodRaw();
+        auto path = req.pathRaw();
+        assert(method.length + path.length > 0);
+    }
+    auto allocationAfter = GC.allocatedInCurrentThread();
+
+    allocationAfter.shouldEqual(allocationBefore);
+}
+
 // Test 3: Parse POST with body
 @("parse POST with body")
 unittest

@@ -64,6 +64,20 @@ struct HTTPRequest
         if (!valid) return "";
         return wrapper.getMethod().toString();
     }
+
+    /**
+     * Get a non-owning method view without allocating.
+     *
+     * The returned slice borrows the request input buffer and must not outlive
+     * this request.
+     */
+    pragma(inline, true)
+    const(char)[] methodRaw() @nogc nothrow @trusted
+    {
+        if (!valid) return null;
+        auto view = wrapper.getMethod();
+        return view.ptr is null ? null : view.ptr[0 .. view.length];
+    }
     
     /**
      * Get request path (without query string)
@@ -84,6 +98,20 @@ struct HTTPRequest
             return fullPath[0 .. queryPos];
         else
             return fullPath;
+    }
+
+    /**
+     * Get the non-owning path view without query parameters or allocation.
+     *
+     * Wire already separates the query component while parsing. The returned
+     * slice borrows the request input buffer.
+     */
+    pragma(inline, true)
+    const(char)[] pathRaw() @nogc nothrow @trusted
+    {
+        if (!valid) return null;
+        auto view = wrapper.getPath();
+        return view.ptr is null ? null : view.ptr[0 .. view.length];
     }
     
     /**
