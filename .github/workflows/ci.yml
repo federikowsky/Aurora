@@ -64,15 +64,15 @@ jobs:
           set -o pipefail
           HOME="$DUB_HOME" dub test --compiler=ldc2 --config=unittest 2>&1 | tee artifacts/ci/unit-tests.log
 
-      - name: Run HTTP framing integration test
+      - name: Run HTTP protocol integration tests
         run: |
           set -o pipefail
-          HOME="$DUB_HOME" dub build benchmarks/server.d --single \
+          HOME="$DUB_HOME" dub build tests/integration/protocol_probe_server.d --single \
             --compiler=ldc2 --build=release 2>&1 \
-            | tee artifacts/ci/http-framing-build.log
+            | tee artifacts/ci/http-protocol-build.log
           python3 tests/integration/http_framing_probe.py \
-            ./benchmarks/aurora_benchmark 2>&1 \
-            | tee artifacts/ci/http-framing-probe.log
+            ./tests/integration/aurora_protocol_probe_server 2>&1 \
+            | tee artifacts/ci/http-protocol-probe.log
 
       - name: Collect release microbenchmark evidence
         run: |
@@ -80,6 +80,15 @@ jobs:
           HOME="$DUB_HOME" dub run benchmarks/microbench.d --single \
             --compiler=ldc2 --build=release 2>&1 \
             | tee artifacts/ci/microbench.log
+
+      - name: Collect D-GC allocation evidence
+        run: |
+          set -o pipefail
+          HOME="$DUB_HOME" dub build benchmarks/allocation_profile.d --single \
+            --compiler=ldc2 --build=release 2>&1 \
+            | tee artifacts/ci/allocation-profile-build.log
+          ./benchmarks/aurora_allocation_profile \
+            | tee artifacts/ci/allocation-profile.jsonl
 
       - name: Upload evidence
         if: always()

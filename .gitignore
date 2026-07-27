@@ -1,5 +1,7 @@
 # Build artifacts
 .dub/
+__pycache__/
+*.py[cod]
 *.o
 *.obj
 *.a
@@ -59,4 +61,6 @@ plan.md
 # Benchmark binaries
 benchmarks/aurora_benchmark
 benchmarks/aurora_microbench
+benchmarks/aurora_allocation_profile
 benchmarks/comparison/*_benchmark
+tests/integration/aurora_protocol_probe_server
