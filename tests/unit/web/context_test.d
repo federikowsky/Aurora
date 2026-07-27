@@ -225,104 +225,34 @@ unittest
     ctx.storage.get!int("key").shouldEqual(0);
 }
 
-// ========================================
-// PERFORMANCE TESTS
-// ========================================
-
-// Test 15: Context creation < 100ns
-@("context creation performance")
+// Timing belongs in benchmarks/microbench.d. Unit tests validate semantics so
+// shared and virtualized CI runners cannot fail correctness on scheduler noise.
+@("storage handles repeated inline and overflow updates")
 unittest
 {
-    import std.datetime.stopwatch;
-    
-    auto sw = StopWatch(AutoStart.yes);
-    
-    foreach (i; 0..10_000)
-    {
-        Context ctx;
-    }
-    
-    sw.stop();
-    auto avgNs = sw.peek().total!"nsecs" / 10_000;
-    
-    // Should be < 100ns per creation
-    assert(avgNs < 100, "Context creation too slow: " ~ avgNs.to!string ~ "ns");
-}
-
-// Test 16: Storage set (inline) < 10ns
-@("storage set inline performance")
-unittest
-{
-    import std.datetime.stopwatch;
-    
     Context ctx;
-    
-    auto sw = StopWatch(AutoStart.yes);
-    
-    foreach (i; 0..100_000)
-    {
-        ctx.storage.set("key", i);
-    }
-    
-    sw.stop();
-    auto avgNs = sw.peek().total!"nsecs" / 100_000;
-    
-    // Should be < 10ns per set (inline)
-    // Note: May be relaxed in debug builds
-    assert(avgNs < 100, "Storage set too slow: " ~ avgNs.to!string ~ "ns");
-}
 
-// Test 17: Storage get (inline) < 10ns
-@("storage get inline performance")
-unittest
-{
-    import std.datetime.stopwatch;
-    
-    Context ctx;
-    ctx.storage.set("key", 123);
-    
-    auto sw = StopWatch(AutoStart.yes);
-    
-    int sum = 0;
-    foreach (i; 0..100_000)
-    {
-        sum += ctx.storage.get!int("key");
-    }
-    
-    sw.stop();
-    auto avgNs = sw.peek().total!"nsecs" / 100_000;
-    
-    // Should be < 10ns per get (inline)
-    assert(avgNs < 100, "Storage get too slow: " ~ avgNs.to!string ~ "ns");
-}
-
-// Test 18: Storage set (overflow) < 50ns
-@("storage overflow performance")
-unittest
-{
-    import std.datetime.stopwatch;
-    
-    Context ctx;
-    
-    // Fill inline storage
     ctx.storage.set("a", 1);
     ctx.storage.set("b", 2);
     ctx.storage.set("c", 3);
     ctx.storage.set("d", 4);
-    
-    auto sw = StopWatch(AutoStart.yes);
-    
-    // Overflow to heap
-    foreach (i; 0..1_000)
+
+    foreach (i; 0 .. 1_000)
     {
+        ctx.storage.set("a", i);
         ctx.storage.set("overflow", i);
     }
-    
-    sw.stop();
-    auto avgNs = sw.peek().total!"nsecs" / 1_000;
-    
-    // Should be < 50ns per set (heap alloc acceptable)
-    assert(avgNs < 500, "Storage overflow too slow: " ~ avgNs.to!string ~ "ns");
+
+    ctx.storage.get!int("a").shouldEqual(999);
+    ctx.storage.get!int("overflow").shouldEqual(999);
+    ctx.storage.count.shouldEqual(5);
+    ctx.storage.overflowEntries.length.shouldEqual(1);
+
+    ctx.storage.remove("b");
+    ctx.storage.has("b").shouldBeFalse;
+    ctx.storage.get!int("overflow").shouldEqual(999);
+    ctx.storage.count.shouldEqual(4);
+    ctx.storage.overflowEntries.length.shouldEqual(0);
 }
 
 // ========================================

@@ -88,7 +88,25 @@ struct ContextStorage
             auto storedValue = cast(void*) cast(size_t) value;
         else
             auto storedValue = cast(void*) value;
-            
+
+        for (uint i = 0; i < count && i < MAX_INLINE_VALUES; i++)
+        {
+            if (inlineEntries[i].key == key)
+            {
+                inlineEntries[i].value = storedValue;
+                return;
+            }
+        }
+
+        foreach (ref entry; overflowEntries)
+        {
+            if (entry.key == key)
+            {
+                entry.value = storedValue;
+                return;
+            }
+        }
+
         if (count < MAX_INLINE_VALUES)
         {
             inlineEntries[count] = Entry(key, storedValue);
@@ -136,23 +154,32 @@ struct ContextStorage
         {
             if (inlineEntries[i].key == key)
             {
-                // Shift remaining entries
-                for (uint j = i; j < count - 1 && j < MAX_INLINE_VALUES - 1; j++)
+                if (overflowEntries.length > 0)
                 {
-                    inlineEntries[j] = inlineEntries[j + 1];
+                    inlineEntries[i] = overflowEntries[0];
+                    foreach (j; 0 .. overflowEntries.length - 1)
+                        overflowEntries[j] = overflowEntries[j + 1];
+                    overflowEntries.length -= 1;
+                }
+                else
+                {
+                    for (uint j = i; j + 1 < count; j++)
+                        inlineEntries[j] = inlineEntries[j + 1];
+                    inlineEntries[count - 1] = Entry.init;
                 }
                 count--;
                 return;
             }
         }
-        
+
         // Search overflow entries
-        import std.algorithm : remove;
         foreach (idx, entry; overflowEntries)
         {
             if (entry.key == key)
             {
-                overflowEntries = overflowEntries.remove(idx);
+                foreach (j; idx .. overflowEntries.length - 1)
+                    overflowEntries[j] = overflowEntries[j + 1];
+                overflowEntries.length -= 1;
                 count--;
                 return;
             }
