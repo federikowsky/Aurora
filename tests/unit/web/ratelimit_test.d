@@ -70,6 +70,21 @@ struct TestContext
     }
 }
 
+private struct ManualClock
+{
+    long nowHnsecs;
+
+    long read() @safe nothrow
+    {
+        return nowHnsecs;
+    }
+
+    void advance(Duration duration) @safe nothrow
+    {
+        nowHnsecs += duration.total!"hnsecs";
+    }
+}
+
 //
 // Test 1-5: Basic Rate Limiting
 //
@@ -187,14 +202,14 @@ unittest
     config.burstSize = 0;
     config.windowSize = 100.msecs;
 
-    auto limiter = new RateLimiter(config);
+    ManualClock clock;
+    auto limiter = new RateLimiter(config, &clock.read);
 
     // Use the token
     assert(limiter.isAllowed("refill_test"));
     assert(!limiter.isAllowed("refill_test"), "Should be blocked immediately after");
 
-    // Wait for refill
-    Thread.sleep(150.msecs);
+    clock.advance(100.msecs);
 
     // Should have a token again
     assert(limiter.isAllowed("refill_test"), "Should have token after refill period");
@@ -209,20 +224,19 @@ unittest
     config.burstSize = 0;
     config.windowSize = 200.msecs;
 
-    auto limiter = new RateLimiter(config);
+    ManualClock clock;
+    auto limiter = new RateLimiter(config, &clock.read);
 
     // Use the token
     assert(limiter.isAllowed("partial"));
     assert(!limiter.isAllowed("partial"));
 
-    // Wait only half the time
-    Thread.sleep(50.msecs);
+    clock.advance(50.msecs);
 
     // Should still be blocked (not enough tokens)
     assert(!limiter.isAllowed("partial"), "Should still be blocked with partial refill");
 
-    // Wait the rest
-    Thread.sleep(200.msecs);
+    clock.advance(150.msecs);
     assert(limiter.isAllowed("partial"), "Should be allowed after full refill");
 }
 

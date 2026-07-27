@@ -18,6 +18,26 @@ import aurora.http;
 import core.time;
 import core.sync.mutex;
 
+alias RateLimitClock = long delegate() @safe nothrow;
+
+private long ticksToHnsecs(long ticks) @safe pure nothrow @nogc
+{
+    import core.time : ticksToNSecs;
+    return ticksToNSecs(ticks) / 100;
+}
+
+unittest
+{
+    import core.time : MonoTime;
+    assert(ticksToHnsecs(MonoTime.ticksPerSecond) == 10_000_000);
+}
+
+private long currentTimeHnsecs() @safe nothrow @nogc
+{
+    import core.time : MonoTime;
+    return ticksToHnsecs(MonoTime.currTime.ticks);
+}
+
 /**
  * RateLimitConfig - Rate limiter configuration
  */
@@ -62,24 +82,24 @@ private struct TokenBucket
     uint maxTokens;
     double refillRate;  // tokens per hnsec
     
-    void initialize(uint maxTokens, Duration refillPeriod) @safe nothrow
+    void initialize(uint maxTokens, Duration refillPeriod, long now) @safe nothrow
     {
         this.maxTokens = maxTokens;
         this.tokens = maxTokens;
-        this.lastRefillTime = currentTimeHnsecs();
-        this.lastAccessTime = currentTimeHnsecs();
+        this.lastRefillTime = now;
+        this.lastAccessTime = now;
         // Calculate refill rate: maxTokens tokens per refillPeriod
         this.refillRate = cast(double)maxTokens / refillPeriod.total!"hnsecs";
     }
     
-    bool tryConsume() @safe nothrow
+    bool tryConsume(long now) @safe nothrow
     {
-        refill();
+        refill(now);
         
         if (tokens >= 1.0)
         {
             tokens -= 1.0;
-            lastAccessTime = currentTimeHnsecs();
+            lastAccessTime = now;
             return true;
         }
         return false;
@@ -95,9 +115,8 @@ private struct TokenBucket
         return cast(uint)(hnsecs / 10_000_000) + 1;  // Round up
     }
     
-    private void refill() @safe nothrow
+    private void refill(long now) @safe nothrow
     {
-        auto now = currentTimeHnsecs();
         auto elapsed = now - lastRefillTime;
         
         if (elapsed > 0)
@@ -106,16 +125,6 @@ private struct TokenBucket
             if (tokens > maxTokens)
                 tokens = maxTokens;
             lastRefillTime = now;
-        }
-    }
-    
-    private static long currentTimeHnsecs() @safe nothrow
-    {
-        import core.time : MonoTime;
-        try {
-            return MonoTime.currTime.ticks;
-        } catch (Exception) {
-            return 0;
         }
     }
 }
@@ -130,13 +139,20 @@ class RateLimiter
     private Mutex mutex;
     private long lastCleanupTime;
     private size_t totalCleaned;  // Statistics
+    private RateLimitClock clock;
     
-    this(RateLimitConfig config) @trusted
+    this(RateLimitConfig config, RateLimitClock clock = null) @trusted
     {
         this.config = config;
         this.mutex = new Mutex();
-        this.lastCleanupTime = currentTimeHnsecs();
+        this.clock = clock;
+        this.lastCleanupTime = now();
         this.totalCleaned = 0;
+    }
+
+    private long now() @safe nothrow
+    {
+        return clock is null ? currentTimeHnsecs() : clock();
     }
     
     /**
@@ -148,8 +164,10 @@ class RateLimiter
         try {
             synchronized (mutex)
             {
+                auto now = this.now();
+
                 // Periodic cleanup check
-                maybeCleanup();
+                maybeCleanup(now);
                 
                 if (key !in buckets)
                 {
@@ -157,7 +175,7 @@ class RateLimiter
                     if (config.maxBuckets > 0 && buckets.length >= config.maxBuckets)
                     {
                         // Force cleanup when at limit
-                        doCleanup();
+                        doCleanup(now);
                         
                         // If still at limit, reject (prevents DoS via bucket exhaustion)
                         if (buckets.length >= config.maxBuckets)
@@ -167,14 +185,15 @@ class RateLimiter
                     TokenBucket bucket;
                     bucket.initialize(
                         config.requestsPerWindow + config.burstSize,
-                        config.windowSize
+                        config.windowSize,
+                        now
                     );
                     buckets[key] = bucket;
                 }
                 
                 // Update access time even on rate limit check
-                buckets[key].lastAccessTime = currentTimeHnsecs();
-                return buckets[key].tryConsume();
+                buckets[key].lastAccessTime = now;
+                return buckets[key].tryConsume(now);
             }
         } catch (Exception) {
             return true;  // On error, allow the request
@@ -208,7 +227,7 @@ class RateLimiter
     {
         synchronized (mutex)
         {
-            return doCleanup();
+            return doCleanup(now());
         }
     }
     
@@ -231,27 +250,25 @@ class RateLimiter
         }
     }
     
-    private void maybeCleanup() @safe nothrow
+    private void maybeCleanup(long now) @safe nothrow
     {
         if (config.cleanupInterval == Duration.zero)
             return;
             
-        auto now = currentTimeHnsecs();
         auto elapsed = now - lastCleanupTime;
         
         if (elapsed >= config.cleanupInterval.total!"hnsecs")
         {
             try {
-                doCleanup();
+                doCleanup(now);
             } catch (Exception) {
                 // Ignore cleanup errors
             }
         }
     }
     
-    private size_t doCleanup() @safe
+    private size_t doCleanup(long now) @safe
     {
-        auto now = currentTimeHnsecs();
         auto expiryHnsecs = config.bucketExpiry.total!"hnsecs";
         
         string[] keysToRemove;
@@ -273,16 +290,6 @@ class RateLimiter
         lastCleanupTime = now;
         
         return keysToRemove.length;
-    }
-    
-    private static long currentTimeHnsecs() @safe nothrow
-    {
-        import core.time : MonoTime;
-        try {
-            return MonoTime.currTime.ticks;
-        } catch (Exception) {
-            return 0;
-        }
     }
 }
 
