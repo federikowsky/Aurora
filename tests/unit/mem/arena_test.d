@@ -200,56 +200,18 @@ unittest
     buffer.shouldNotBeNull;
 }
 
-// ========================================
-// PERFORMANCE TESTS
-// ========================================
-
-// Test 13: Allocation is fast
-@("allocation latency is fast")
+// Latency is measured in benchmarks/microbench.d. A one-shot nanosecond
+// assertion is not a deterministic correctness test on virtualized runners.
+@("reset reuses arena storage")
 unittest
 {
-    import std.datetime.stopwatch;
-    
-    auto arena = new Arena(1_000_000);  // 1 MB
-    
-    auto sw = StopWatch(AutoStart.yes);
-    
-    foreach (i; 0..10_000)
-    {
-        arena.allocate(64);
-    }
-    
-    sw.stop();
-    auto totalNs = sw.peek.total!"nsecs";
-    auto avgNs = totalNs / 10_000;
-    
-    // Target: < 50ns per allocation (bump allocator is fast!)
-    assert(avgNs < 50, "Allocation too slow");
-}
-
-// Test 14: Reset is fast
-@("reset latency is fast")
-unittest
-{
-    import std.datetime.stopwatch;
-    
-    auto arena = new Arena(100_000);
-    
-    // Fill arena
-    foreach (i; 0..1000)
-    {
-        arena.allocate(64);
-    }
-    
-    auto sw = StopWatch(AutoStart.yes);
-    
+    auto arena = new Arena(4096);
+    auto first = arena.allocate(64);
+    first.shouldNotBeNull;
     arena.reset();
-    
-    sw.stop();
-    auto ns = sw.peek.total!"nsecs";
-    
-    // Target: < 100ns for reset (just pointer reset)
-    assert(ns < 100, "Reset too slow");
+    auto second = arena.allocate(64);
+    second.shouldNotBeNull;
+    assert(first.ptr == second.ptr, "reset must rewind the bump pointer");
 }
 
 // ========================================

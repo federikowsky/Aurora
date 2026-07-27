@@ -58,4 +58,5 @@ lib/
 plan.md
 # Benchmark binaries
 benchmarks/aurora_benchmark
+benchmarks/aurora_microbench
 benchmarks/comparison/*_benchmark

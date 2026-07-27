@@ -20,6 +20,7 @@ import aurora.web.router : Router, PathParams;
 import aurora.web.context : Context;
 import aurora.http : HTTPResponse, HTTPRequest;
 import aurora.http.util : buildResponseInto;
+import aurora.mem.arena : Arena;
 
 enum ITERATIONS = 1_000_000;
 enum WARMUP = 10_000;
@@ -36,17 +37,23 @@ void main()
     
     // 2. Context creation
     benchContextCreation();
+
+    // 3. Context storage
+    benchContextStorage();
+
+    // 4. Arena allocation/reset
+    benchArena();
     
-    // 3. HTTPResponse creation
+    // 5. HTTPResponse creation
     benchResponseCreation();
     
-    // 4. buildResponseInto
+    // 6. buildResponseInto
     benchBuildResponse();
     
-    // 5. PathParams operations
+    // 7. PathParams operations
     benchPathParams();
     
-    // 6. Full request simulation (no I/O)
+    // 8. Full request simulation (no I/O)
     benchFullRequest();
     
     writeln();
@@ -132,6 +139,53 @@ void benchContextCreation()
     sw.stop();
     
     printResult("  Context struct init", sw.peek, ITERATIONS);
+    writeln();
+}
+
+void benchContextStorage()
+{
+    writeln("─── Context Storage ──────────────────────────────────────────");
+
+    Context ctx;
+    foreach (i; 0 .. WARMUP)
+    {
+        ctx.storage.set("key", i);
+        auto value = ctx.storage.get!int("key");
+    }
+
+    auto setWatch = StopWatch(AutoStart.yes);
+    foreach (i; 0 .. ITERATIONS)
+        ctx.storage.set("key", i);
+    setWatch.stop();
+
+    printResult("  Inline storage set", setWatch.peek, ITERATIONS);
+    writeln();
+}
+
+void benchArena()
+{
+    writeln("─── Arena Allocation ─────────────────────────────────────────");
+
+    auto arena = new Arena((ITERATIONS + WARMUP) * 64);
+    foreach (_; 0 .. WARMUP)
+        arena.allocate(64);
+
+    auto allocateWatch = StopWatch(AutoStart.yes);
+    foreach (_; 0 .. ITERATIONS)
+        arena.allocate(64);
+    allocateWatch.stop();
+
+    auto resetWatch = StopWatch(AutoStart.yes);
+    foreach (_; 0 .. ITERATIONS)
+    {
+        arena.reset();
+        auto allocation = arena.allocate(64);
+        assert(allocation.ptr !is null);
+    }
+    resetWatch.stop();
+
+    printResult("  Arena allocate", allocateWatch.peek, ITERATIONS);
+    printResult("  Arena reset + allocate", resetWatch.peek, ITERATIONS);
     writeln();
 }
 
@@ -272,17 +326,35 @@ void benchFullRequest()
     printResult("  Full request (match+ctx+handler+build)", sw.peek, ITERATIONS);
     
     // Calculate theoretical max RPS
-    auto nsPerOp = sw.peek.total!"nsecs" / ITERATIONS;
-    auto theoreticalRps = 1_000_000_000 / nsPerOp;
-    writefln("  Theoretical max: %,d req/s (single-threaded, no I/O)", theoreticalRps);
+    auto totalNs = sw.peek.total!"nsecs";
+    if (totalNs > 0)
+    {
+        auto theoreticalRps =
+            cast(double)ITERATIONS * 1_000_000_000.0 / cast(double)totalNs;
+        writefln(
+            "  Theoretical max: %,.0f req/s (single-threaded, no I/O)",
+            theoreticalRps
+        );
+    }
+    else
+    {
+        writeln("  Theoretical max: unavailable (below timer resolution)");
+    }
     writeln();
 }
 
 void printResult(string name, Duration duration, ulong iterations)
 {
     auto totalNs = duration.total!"nsecs";
-    auto nsPerOp = totalNs / iterations;
-    auto opsPerSec = iterations * 1_000_000_000 / totalNs;
-    
-    writefln("%s: %,d ns/op (%,d ops/sec)", name, nsPerOp, opsPerSec);
+    if (totalNs <= 0 || iterations == 0)
+    {
+        writefln("%s: below timer resolution", name);
+        return;
+    }
+
+    auto nsPerOp = cast(double)totalNs / cast(double)iterations;
+    auto opsPerSec =
+        cast(double)iterations * 1_000_000_000.0 / cast(double)totalNs;
+
+    writefln("%s: %,.2f ns/op (%,.0f ops/sec)", name, nsPerOp, opsPerSec);
 }
