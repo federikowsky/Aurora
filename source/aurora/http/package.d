@@ -119,6 +119,19 @@ struct HTTPRequest
         if (!valid) return "";
         return wrapper.getBody().toString();
     }
+
+    /**
+     * Replace the non-owning body view after transport-level decoding.
+     *
+     * The supplied storage must remain alive for the lifetime of this request.
+     * Aurora's server uses this after compacting a chunked body in-place.
+     */
+    package(aurora) void setBodyView(
+        return scope ubyte[] data
+    ) @trusted nothrow @nogc
+    {
+        wrapper.request.content.body = StringView(cast(const(char)[]) data);
+    }
     
     /**
      * Get HTTP version

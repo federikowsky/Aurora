@@ -50,11 +50,593 @@ else
 // Standard library
 import core.atomic;
 import core.time;
-import core.stdc.string : memcpy;
+import core.stdc.string : memcpy, memmove;
 import std.format : format;
 import std.stdio : stderr, writeln, writefln;
 import std.conv : to;
 import std.algorithm : min;
+
+private enum FrameStatus : ubyte
+{
+    incomplete,
+    complete,
+    badRequest,
+    headerTooLarge,
+    bodyTooLarge
+}
+
+private struct FrameResult
+{
+    FrameStatus status;
+    size_t messageLength;
+}
+
+private enum BodyFraming : ubyte
+{
+    unknown,
+    none,
+    contentLength,
+    chunked
+}
+
+private enum ChunkState : ubyte
+{
+    sizeLine,
+    data,
+    dataTerminator,
+    trailers
+}
+
+/**
+ * Incremental HTTP/1 request framer.
+ *
+ * The framer only identifies the byte range belonging to one request. Wire
+ * remains authoritative for HTTP syntax and semantic parsing. Keeping framing
+ * separate prevents a second pipelined request from being fed to Wire together
+ * with the first one, which would otherwise overwrite the first parse result.
+ */
+private struct RequestFramer
+{
+    private size_t maxHeaderSize;
+    private size_t maxBodySize;
+    private size_t headerScanPos;
+    private size_t headerEnd;
+    private BodyFraming bodyFraming;
+    private size_t contentLength;
+    private ChunkState chunkState;
+    private size_t chunkCursor;
+    private size_t chunkScanPos;
+    private size_t decodedBodyBytes;
+    private size_t trailerLineStart;
+
+    this(size_t maxHeaderSize, size_t maxBodySize) @safe nothrow
+    {
+        this.maxHeaderSize = maxHeaderSize;
+        this.maxBodySize = maxBodySize;
+        reset();
+    }
+
+    void reset() @safe nothrow
+    {
+        headerScanPos = 0;
+        headerEnd = 0;
+        bodyFraming = BodyFraming.unknown;
+        contentLength = 0;
+        chunkState = ChunkState.sizeLine;
+        chunkCursor = 0;
+        chunkScanPos = 0;
+        decodedBodyBytes = 0;
+        trailerLineStart = 0;
+    }
+
+    FrameResult inspect(scope const(ubyte)[] data) @safe nothrow
+    {
+        if (bodyFraming == BodyFraming.unknown)
+        {
+            auto headerResult = inspectHeaders(data);
+            if (headerResult.status != FrameStatus.complete)
+                return headerResult;
+        }
+
+        final switch (bodyFraming)
+        {
+            case BodyFraming.none:
+                return FrameResult(FrameStatus.complete, headerEnd);
+
+            case BodyFraming.contentLength:
+                if (contentLength > size_t.max - headerEnd)
+                    return FrameResult(FrameStatus.bodyTooLarge, 0);
+
+                auto messageLength = headerEnd + contentLength;
+                if (data.length < messageLength)
+                    return FrameResult(FrameStatus.incomplete, 0);
+                return FrameResult(FrameStatus.complete, messageLength);
+
+            case BodyFraming.chunked:
+                return inspectChunked(data);
+
+            case BodyFraming.unknown:
+                return FrameResult(FrameStatus.incomplete, 0);
+        }
+    }
+
+    private FrameResult inspectHeaders(scope const(ubyte)[] data) @safe nothrow
+    {
+        size_t terminator = size_t.max;
+
+        for (size_t i = headerScanPos; i + 3 < data.length; ++i)
+        {
+            if (data[i] == '\r' && data[i + 1] == '\n' &&
+                data[i + 2] == '\r' && data[i + 3] == '\n')
+            {
+                terminator = i;
+                break;
+            }
+        }
+
+        if (terminator == size_t.max)
+        {
+            headerScanPos = data.length >= 3 ? data.length - 3 : 0;
+            if (data.length >= maxHeaderSize)
+                return FrameResult(FrameStatus.headerTooLarge, 0);
+            return FrameResult(FrameStatus.incomplete, 0);
+        }
+
+        headerEnd = terminator + 4;
+        if (headerEnd > maxHeaderSize)
+            return FrameResult(FrameStatus.headerTooLarge, 0);
+
+        bool contentLengthSeen;
+        bool transferEncodingSeen;
+        bool chunkedTransferEncoding;
+
+        auto requestLineEnd = findCRLF(data, 0, headerEnd);
+        if (requestLineEnd == size_t.max || requestLineEnd == 0)
+            return FrameResult(FrameStatus.badRequest, 0);
+
+        size_t lineStart = requestLineEnd + 2;
+        while (lineStart < terminator)
+        {
+            auto lineEnd = findCRLF(data, lineStart, headerEnd);
+            if (lineEnd == size_t.max || lineEnd == lineStart)
+                return FrameResult(FrameStatus.badRequest, 0);
+
+            size_t colon = lineStart;
+            while (colon < lineEnd && data[colon] != ':')
+                ++colon;
+            if (colon == lineStart || colon == lineEnd)
+                return FrameResult(FrameStatus.badRequest, 0);
+
+            auto name = data[lineStart .. colon];
+            auto value = trimOWS(data[colon + 1 .. lineEnd]);
+
+            if (equalsIgnoreCase(name, "content-length"))
+            {
+                size_t parsedLength;
+                if (!parseDecimal(value, parsedLength))
+                    return FrameResult(FrameStatus.badRequest, 0);
+
+                // Strictly reject duplicates. This avoids differing
+                // intermediary policies becoming a request-smuggling vector.
+                if (contentLengthSeen)
+                    return FrameResult(FrameStatus.badRequest, 0);
+
+                contentLengthSeen = true;
+                contentLength = parsedLength;
+            }
+            else if (equalsIgnoreCase(name, "transfer-encoding"))
+            {
+                // Aurora currently decodes only a single `chunked` transfer
+                // coding. Reject duplicate or stacked codings explicitly.
+                if (transferEncodingSeen)
+                    return FrameResult(FrameStatus.badRequest, 0);
+                transferEncodingSeen = true;
+                chunkedTransferEncoding =
+                    equalsIgnoreCase(trimOWS(value), "chunked");
+            }
+
+            lineStart = lineEnd + 2;
+        }
+
+        if (transferEncodingSeen && contentLengthSeen)
+            return FrameResult(FrameStatus.badRequest, 0);
+
+        if (transferEncodingSeen)
+        {
+            if (!chunkedTransferEncoding)
+                return FrameResult(FrameStatus.badRequest, 0);
+
+            bodyFraming = BodyFraming.chunked;
+            chunkState = ChunkState.sizeLine;
+            chunkCursor = headerEnd;
+            chunkScanPos = headerEnd;
+            return FrameResult(FrameStatus.complete, 0);
+        }
+
+        if (contentLengthSeen)
+        {
+            if (contentLength > maxBodySize)
+                return FrameResult(FrameStatus.bodyTooLarge, 0);
+            bodyFraming = BodyFraming.contentLength;
+        }
+        else
+        {
+            bodyFraming = BodyFraming.none;
+        }
+
+        return FrameResult(FrameStatus.complete, 0);
+    }
+
+    private FrameResult inspectChunked(scope const(ubyte)[] data) @safe nothrow
+    {
+        while (true)
+        {
+            final switch (chunkState)
+            {
+                case ChunkState.sizeLine:
+                {
+                    auto lineEnd = findCRLF(data, chunkScanPos, data.length);
+                    if (lineEnd == size_t.max)
+                    {
+                        if (data.length - chunkCursor > maxHeaderSize)
+                            return FrameResult(FrameStatus.headerTooLarge, 0);
+                        chunkScanPos = data.length > 0 ? data.length - 1 : 0;
+                        return FrameResult(FrameStatus.incomplete, 0);
+                    }
+
+                    size_t chunkSize;
+                    if (!parseChunkSize(data[chunkCursor .. lineEnd], chunkSize))
+                        return FrameResult(FrameStatus.badRequest, 0);
+
+                    chunkCursor = lineEnd + 2;
+                    chunkScanPos = chunkCursor;
+
+                    if (chunkSize == 0)
+                    {
+                        chunkState = ChunkState.trailers;
+                        trailerLineStart = chunkCursor;
+                        continue;
+                    }
+
+                    if (chunkSize > maxBodySize - decodedBodyBytes)
+                        return FrameResult(FrameStatus.bodyTooLarge, 0);
+
+                    decodedBodyBytes += chunkSize;
+                    contentLength = chunkSize;
+                    chunkState = ChunkState.data;
+                    continue;
+                }
+
+                case ChunkState.data:
+                    if (contentLength > size_t.max - chunkCursor)
+                        return FrameResult(FrameStatus.bodyTooLarge, 0);
+                    if (data.length < chunkCursor + contentLength)
+                        return FrameResult(FrameStatus.incomplete, 0);
+                    chunkCursor += contentLength;
+                    chunkState = ChunkState.dataTerminator;
+                    continue;
+
+                case ChunkState.dataTerminator:
+                    if (data.length < chunkCursor + 2)
+                        return FrameResult(FrameStatus.incomplete, 0);
+                    if (data[chunkCursor] != '\r' || data[chunkCursor + 1] != '\n')
+                        return FrameResult(FrameStatus.badRequest, 0);
+                    chunkCursor += 2;
+                    chunkScanPos = chunkCursor;
+                    chunkState = ChunkState.sizeLine;
+                    continue;
+
+                case ChunkState.trailers:
+                {
+                    auto lineEnd = findCRLF(data, chunkScanPos, data.length);
+                    if (lineEnd == size_t.max)
+                    {
+                        if (data.length - trailerLineStart > maxHeaderSize)
+                            return FrameResult(FrameStatus.headerTooLarge, 0);
+                        chunkScanPos = data.length > 0 ? data.length - 1 : 0;
+                        return FrameResult(FrameStatus.incomplete, 0);
+                    }
+
+                    if (lineEnd == trailerLineStart)
+                        return FrameResult(FrameStatus.complete, lineEnd + 2);
+
+                    trailerLineStart = lineEnd + 2;
+                    chunkScanPos = trailerLineStart;
+                    continue;
+                }
+            }
+        }
+    }
+
+    /**
+     * Decode an already validated chunked body into the request buffer.
+     *
+     * Chunk payloads are compacted immediately after the headers. This keeps
+     * the public body view contiguous without a GC allocation. Header, method
+     * and path views remain at their original addresses.
+     */
+    ubyte[] decodeChunkedBodyInPlace(
+        return scope ubyte[] data
+    ) @trusted nothrow @nogc
+    {
+        if (bodyFraming != BodyFraming.chunked || headerEnd > data.length)
+            return null;
+
+        size_t readPosition = headerEnd;
+        size_t writePosition = headerEnd;
+
+        while (readPosition < data.length)
+        {
+            auto lineEnd = findCRLF(data, readPosition, data.length);
+            if (lineEnd == size_t.max)
+                return null;
+
+            size_t chunkSize;
+            if (!parseChunkSize(data[readPosition .. lineEnd], chunkSize))
+                return null;
+
+            readPosition = lineEnd + 2;
+            if (chunkSize == 0)
+                return data[headerEnd .. writePosition];
+
+            if (chunkSize > data.length - readPosition)
+                return null;
+            if (data.length - readPosition - chunkSize < 2)
+                return null;
+
+            if (writePosition != readPosition)
+            {
+                memmove(
+                    data.ptr + writePosition,
+                    data.ptr + readPosition,
+                    chunkSize
+                );
+            }
+            writePosition += chunkSize;
+            readPosition += chunkSize;
+
+            if (data[readPosition] != '\r' || data[readPosition + 1] != '\n')
+                return null;
+            readPosition += 2;
+        }
+
+        return null;
+    }
+
+    bool usesChunkedEncoding() const @safe pure nothrow @nogc
+    {
+        return bodyFraming == BodyFraming.chunked;
+    }
+
+    private static size_t findCRLF(
+        scope const(ubyte)[] data,
+        size_t start,
+        size_t limit
+    ) @safe pure nothrow @nogc
+    {
+        auto end = min(limit, data.length);
+        for (size_t i = start; i + 1 < end; ++i)
+        {
+            if (data[i] == '\r' && data[i + 1] == '\n')
+                return i;
+        }
+        return size_t.max;
+    }
+
+    private static const(ubyte)[] trimOWS(
+        scope return const(ubyte)[] value
+    ) @safe pure nothrow @nogc
+    {
+        size_t start;
+        size_t end = value.length;
+        while (start < end && (value[start] == ' ' || value[start] == '\t'))
+            ++start;
+        while (end > start && (value[end - 1] == ' ' || value[end - 1] == '\t'))
+            --end;
+        return value[start .. end];
+    }
+
+    private static bool equalsIgnoreCase(
+        scope const(ubyte)[] value,
+        scope const(char)[] expected
+    ) @safe pure nothrow @nogc
+    {
+        if (value.length != expected.length)
+            return false;
+
+        foreach (i; 0 .. value.length)
+        {
+            if (toLowerASCII(value[i]) != toLowerASCII(cast(ubyte) expected[i]))
+                return false;
+        }
+        return true;
+    }
+
+    private static ubyte toLowerASCII(ubyte value) @safe pure nothrow @nogc
+    {
+        return value >= 'A' && value <= 'Z'
+            ? cast(ubyte)(value + ('a' - 'A'))
+            : value;
+    }
+
+    private static bool parseDecimal(
+        scope const(ubyte)[] raw,
+        out size_t value
+    ) @safe pure nothrow @nogc
+    {
+        auto digits = trimOWS(raw);
+        if (digits.length == 0)
+            return false;
+
+        value = 0;
+        foreach (digit; digits)
+        {
+            if (digit < '0' || digit > '9')
+                return false;
+            auto numeric = cast(size_t)(digit - '0');
+            if (value > (size_t.max - numeric) / 10)
+                return false;
+            value = value * 10 + numeric;
+        }
+        return true;
+    }
+
+    private static bool parseChunkSize(
+        scope const(ubyte)[] raw,
+        out size_t value
+    ) @safe pure nothrow @nogc
+    {
+        size_t extension = raw.length;
+        foreach (i, current; raw)
+        {
+            if (current == ';')
+            {
+                extension = i;
+                break;
+            }
+        }
+
+        auto digits = trimOWS(raw[0 .. extension]);
+        if (digits.length == 0)
+            return false;
+
+        value = 0;
+        foreach (digit; digits)
+        {
+            size_t numeric;
+            if (digit >= '0' && digit <= '9')
+                numeric = digit - '0';
+            else if (digit >= 'a' && digit <= 'f')
+                numeric = digit - 'a' + 10;
+            else if (digit >= 'A' && digit <= 'F')
+                numeric = digit - 'A' + 10;
+            else
+                return false;
+
+            if (value > (size_t.max - numeric) / 16)
+                return false;
+            value = value * 16 + numeric;
+        }
+        return true;
+    }
+}
+
+unittest
+{
+    enum requestHeaders =
+        "POST /echo HTTP/1.1\r\n" ~
+        "Host: localhost\r\n" ~
+        "Content-Length: 5\r\n\r\n";
+    enum request = requestHeaders ~ "hello";
+    auto bytes = cast(const(ubyte)[]) request;
+
+    RequestFramer framer = RequestFramer(1024, 1024);
+
+    foreach (length; 1 .. request.length)
+    {
+        auto result = framer.inspect(bytes[0 .. length]);
+        assert(result.status == FrameStatus.incomplete);
+    }
+
+    auto complete = framer.inspect(bytes);
+    assert(complete.status == FrameStatus.complete);
+    assert(complete.messageLength == request.length);
+}
+
+unittest
+{
+    enum first = "GET /first HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    enum second = "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    enum pipelined = first ~ second;
+    auto bytes = cast(const(ubyte)[]) pipelined;
+
+    RequestFramer framer = RequestFramer(1024, 1024);
+    auto firstResult = framer.inspect(bytes);
+
+    assert(firstResult.status == FrameStatus.complete);
+    assert(firstResult.messageLength == first.length);
+
+    framer.reset();
+    auto secondResult = framer.inspect(bytes[firstResult.messageLength .. $]);
+
+    assert(secondResult.status == FrameStatus.complete);
+    assert(secondResult.messageLength == second.length);
+}
+
+unittest
+{
+    enum chunked =
+        "POST /echo HTTP/1.1\r\n" ~
+        "Host: localhost\r\n" ~
+        "Transfer-Encoding: chunked\r\n\r\n" ~
+        "4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
+    auto bytes = cast(ubyte[]) chunked.dup;
+    RequestFramer framer = RequestFramer(1024, 1024);
+
+    foreach (length; 1 .. chunked.length)
+    {
+        auto result = framer.inspect(bytes[0 .. length]);
+        assert(result.status == FrameStatus.incomplete);
+    }
+
+    auto complete = framer.inspect(bytes);
+    assert(complete.status == FrameStatus.complete);
+    assert(complete.messageLength == chunked.length);
+
+    auto request = HTTPRequest.parse(bytes[0 .. complete.messageLength]);
+    assert(request.isComplete());
+
+    auto decodedBody = framer.decodeChunkedBodyInPlace(
+        bytes[0 .. complete.messageLength]
+    );
+    request.setBodyView(decodedBody);
+    assert(request.body() == "Wikipedia");
+}
+
+unittest
+{
+    enum conflicting =
+        "POST /echo HTTP/1.1\r\n" ~
+        "Host: localhost\r\n" ~
+        "Content-Length: 4\r\n" ~
+        "Transfer-Encoding: chunked\r\n\r\n" ~
+        "0\r\n\r\n";
+    RequestFramer conflictingFramer = RequestFramer(1024, 1024);
+    auto conflictingResult =
+        conflictingFramer.inspect(cast(const(ubyte)[]) conflicting);
+    assert(conflictingResult.status == FrameStatus.badRequest);
+
+    enum oversized =
+        "POST /echo HTTP/1.1\r\n" ~
+        "Host: localhost\r\n" ~
+        "Content-Length: 5\r\n\r\n";
+    RequestFramer oversizedFramer = RequestFramer(1024, 4);
+    auto oversizedResult = oversizedFramer.inspect(cast(const(ubyte)[]) oversized);
+    assert(oversizedResult.status == FrameStatus.bodyTooLarge);
+
+    enum duplicateContentLength =
+        "POST /echo HTTP/1.1\r\n" ~
+        "Host: localhost\r\n" ~
+        "Content-Length: 5\r\n" ~
+        "Content-Length: 5\r\n\r\n" ~
+        "hello";
+    RequestFramer duplicateLengthFramer = RequestFramer(1024, 1024);
+    auto duplicateLengthResult = duplicateLengthFramer.inspect(
+        cast(const(ubyte)[]) duplicateContentLength
+    );
+    assert(duplicateLengthResult.status == FrameStatus.badRequest);
+
+    enum unsupportedTransferCoding =
+        "POST /echo HTTP/1.1\r\n" ~
+        "Host: localhost\r\n" ~
+        "Transfer-Encoding: gzip, chunked\r\n\r\n" ~
+        "0\r\n\r\n";
+    RequestFramer transferCodingFramer = RequestFramer(1024, 1024);
+    auto transferCodingResult = transferCodingFramer.inspect(
+        cast(const(ubyte)[]) unsupportedTransferCoding
+    );
+    assert(transferCodingResult.status == FrameStatus.badRequest);
+}
 
 // ============================================================================
 // PLATFORM DETECTION
@@ -1026,6 +1608,8 @@ final class Server
         if (_pool is null) _pool = new BufferPool();
         ubyte[] buffer = _pool.acquire(BufferSize.MEDIUM);  // 16KB from pool
         scope(exit) _pool.release(buffer);
+        size_t buffered = 0;
+        RequestFramer framer = RequestFramer(maxHeader, maxBody);
         uint requestCount = 0;
         
         // Keep-alive loop
@@ -1039,118 +1623,132 @@ final class Server
             if (requestCount > 0)
                 conn.readTimeout = config.keepAliveTimeout;
             
-            // Wait for data to be available first
-            // This properly handles keep-alive: if client closes, we exit cleanly
-            try
+            FrameResult frame;
+            readLoop: while (true)
             {
-                if (conn.empty)
-                    return;  // Client closed connection - clean exit
-            }
-            catch (Exception)
-            {
-                return;  // Connection error
-            }
-            
-            // Now read the request
-            size_t totalReceived = 0;
-            bool headersComplete = false;
-            size_t headerEndPos = 0;
-            
-            // Read until we have complete headers
-            readLoop: while (!headersComplete && totalReceived < maxHeader)
-            {
-                // Grow buffer if needed
-                if (totalReceived >= buffer.length)
+                frame = framer.inspect(buffer[0 .. buffered]);
+                if (frame.status != FrameStatus.incomplete)
+                    break readLoop;
+
+                if (buffered >= buffer.length)
                 {
-                    if (buffer.length >= maxHeader)
+                    size_t maxRequestSize = maxHeader;
+                    if (maxBody > size_t.max - maxRequestSize)
+                        maxRequestSize = size_t.max;
+                    else
+                        maxRequestSize += maxBody;
+
+                    // Allow bounded chunk metadata and trailers in addition to
+                    // the decoded body limit.
+                    if (maxRequestSize != size_t.max)
                     {
-                        atomicOp!"+="(rejectedHeadersTooLarge, 1);
+                        if (maxHeader > size_t.max - maxRequestSize)
+                            maxRequestSize = size_t.max;
+                        else
+                            maxRequestSize += maxHeader;
+                    }
+
+                    if (buffer.length >= maxRequestSize)
+                    {
+                        atomicOp!"+="(rejectedBodyTooLarge, 1);
                         auto writer = ResponseWriter(conn, &shuttingDown);
-                        writer.writeError(431, "Request Header Fields Too Large");
+                        writer.writeError(413, "Payload Too Large");
                         return;
                     }
-                    // Grow buffer using pool
-                    auto newSize = min(buffer.length * 2, maxHeader);
+
+                    auto newSize = buffer.length > maxRequestSize / 2
+                        ? maxRequestSize
+                        : buffer.length * 2;
                     auto newBuf = _pool.acquire(newSize);
-                    newBuf[0..totalReceived] = buffer[0..totalReceived];
-                    _pool.release(buffer);  // Return old buffer to pool
+                    if (newBuf.ptr is null)
+                    {
+                        atomicOp!"+="(totalErrors, 1);
+                        auto writer = ResponseWriter(conn, &shuttingDown);
+                        writer.writeError(500, "Internal Server Error");
+                        return;
+                    }
+
+                    newBuf[0 .. buffered] = buffer[0 .. buffered];
+                    _pool.release(buffer);
                     buffer = newBuf;
                 }
-                
-                // Peek at available data
+
                 ubyte[] chunk;
                 try
                 {
                     chunk = cast(ubyte[])conn.peek();
-                    
+
                     if (chunk.length == 0)
                     {
-                        // No data available - check if connection closed
                         if (conn.empty)
                         {
-                            if (totalReceived == 0)
-                                return;  // Clean close, no partial data
-                            // Partial data received but connection closed
+                            if (buffered == 0)
+                                return;
                             atomicOp!"+="(totalErrors, 1);
                             return;
                         }
-                        
-                        // Connection still open, wait for more data
-                        // waitForData will yield the fiber
+
                         if (!conn.waitForData())
                         {
-                            // Timeout or error
-                            if (totalReceived == 0)
-                                return;  // Clean timeout on keep-alive
+                            if (buffered == 0)
+                                return;
                             atomicOp!"+="(rejectedTimeout, 1);
                             return;
                         }
                         continue readLoop;
                     }
-                    
-                    // Copy available data to buffer
-                    auto toCopy = min(chunk.length, buffer.length - totalReceived);
-                    buffer[totalReceived .. totalReceived + toCopy] = chunk[0 .. toCopy];
+
+                    auto toCopy = min(chunk.length, buffer.length - buffered);
+                    buffer[buffered .. buffered + toCopy] = chunk[0 .. toCopy];
                     conn.skip(toCopy);
-                    totalReceived += toCopy;
+                    buffered += toCopy;
                 }
                 catch (Exception)
                 {
-                    if (totalReceived == 0)
-                        return;  // Clean close
+                    if (buffered == 0)
+                        return;
                     atomicOp!"+="(totalErrors, 1);
                     return;
                 }
-                
-                // Check for end of headers (\r\n\r\n)
-                if (totalReceived >= 4)
-                {
-                    for (size_t i = 0; i + 3 < totalReceived; i++)
-                    {
-                        if (buffer[i] == '\r' && buffer[i+1] == '\n' && 
-                            buffer[i+2] == '\r' && buffer[i+3] == '\n')
-                        {
-                            headersComplete = true;
-                            headerEndPos = i + 4;
-                            break;
-                        }
-                    }
-                }
             }
-            
-            if (!headersComplete)
+
+            final switch (frame.status)
             {
-                atomicOp!"+="(rejectedHeadersTooLarge, 1);
-                auto writer = ResponseWriter(conn, &shuttingDown);
-                writer.writeError(431, "Request Header Fields Too Large");
-                return;
+                case FrameStatus.headerTooLarge:
+                {
+                    atomicOp!"+="(rejectedHeadersTooLarge, 1);
+                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    writer.writeError(431, "Request Header Fields Too Large");
+                    return;
+                }
+
+                case FrameStatus.bodyTooLarge:
+                {
+                    atomicOp!"+="(rejectedBodyTooLarge, 1);
+                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    writer.writeError(413, "Payload Too Large");
+                    return;
+                }
+
+                case FrameStatus.badRequest:
+                {
+                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    writer.writeError(400, "Bad Request");
+                    return;
+                }
+
+                case FrameStatus.complete:
+                    break;
+
+                case FrameStatus.incomplete:
+                    return;
             }
             
             // Parse HTTP request
             HTTPRequest request;
             try
             {
-                request = HTTPRequest.parse(buffer[0..totalReceived]);
+                request = HTTPRequest.parse(buffer[0 .. frame.messageLength]);
             }
             catch (Exception)
             {
@@ -1159,11 +1757,25 @@ final class Server
                 break;
             }
             
-            if (request.hasError())
+            if (request.hasError() || !request.isComplete())
             {
                 auto writer = ResponseWriter(conn, &shuttingDown);
                 writer.writeError(400, "Bad Request");
                 break;
+            }
+
+            if (framer.usesChunkedEncoding())
+            {
+                auto decodedBody = framer.decodeChunkedBodyInPlace(
+                    buffer[0 .. frame.messageLength]
+                );
+                if (decodedBody.ptr is null)
+                {
+                    auto writer = ResponseWriter(conn, &shuttingDown);
+                    writer.writeError(400, "Bad Request");
+                    break;
+                }
+                request.setBodyView(decodedBody);
             }
             
             // Check Content-Length against maxBodySize
@@ -1272,6 +1884,18 @@ final class Server
                 break;
             if (request.httpVersion() == "HTTP/1.0" && connHeader != "keep-alive")
                 break;
+
+            auto remaining = buffered - frame.messageLength;
+            if (remaining > 0)
+            {
+                memmove(
+                    buffer.ptr,
+                    buffer.ptr + frame.messageLength,
+                    remaining
+                );
+            }
+            buffered = remaining;
+            framer.reset();
             
             // Update timeout for keep-alive
             conn.readTimeout = config.keepAliveTimeout;
