@@ -12,7 +12,7 @@
     "stride": 64,
     "threads": 1
   },
-  "platform": "Linux-6.17.0-1010-azure-x86_64-with-glibc2.39",
+  "platform": "Linux-6.17.0-1020-azure-x86_64-with-glibc2.39",
   "python": "3.12.3",
   "reason": "less-than-two-numa-nodes",
   "results": [
