@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- Response buffer construction now keeps insufficient-capacity failures sticky,
+  preventing integer wraparound and writes outside the caller's slice. A failed
+  call returns zero; discard any partial output inside the supplied buffer.
+- Pin Wire's exclusive parser leases so two live requests on the same thread
+  retain independent metadata. Regression tests cover the Aurora consumer API.
+
+### Ownership and allocation
+- Request views still borrow their input buffer. Keep that buffer alive and
+  unchanged for the duration of request processing.
+- Wire reuses one idle parser per thread. Overlapping leases may allocate native
+  memory; `@nogc` does not mean no native allocation. Its explicit owned-parser
+  API supports reuse when the caller controls the parser lifetime.
+- See [engineering status](docs/ENGINEERING_STATUS.md) for validation scope and
+  remaining release blockers.
+
 ## [1.0.0] - 2025-12-06 "Production Release"
 
 **Aurora v1.0.0** - First stable release with API freeze guarantee.

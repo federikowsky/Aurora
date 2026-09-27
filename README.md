@@ -6,14 +6,16 @@
   <p align="center">
     <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
     <a href="https://dlang.org/"><img src="https://img.shields.io/badge/D-2.100+-red.svg" alt="D"></a>
-    <a href="tests/"><img src="https://img.shields.io/badge/tests-38%20modules%20passing-brightgreen" alt="Tests"></a>
+    <a href="tests/"><img src="https://img.shields.io/badge/tests-source-blue" alt="Tests"></a>
     <a href="https://code.dlang.org/packages/aurora"><img src="https://img.shields.io/dub/v/aurora" alt="DUB"></a>
   </p>
 </p>
 
 ---
 
-Aurora is a **production-ready** HTTP/1.1 framework for D, designed for enterprise workloads. It features zero-copy parsing, memory pools, fiber-based concurrency, and batteries-included middleware for rate limiting, circuit breaking, health probes, and distributed tracing.
+Aurora is an HTTP/1.1 framework for D under active engineering validation. It features zero-copy parsing, memory pools, fiber-based concurrency, and batteries-included middleware for rate limiting, circuit breaking, health probes, and distributed tracing.
+
+**Release status:** known correctness and lifecycle blockers remain. See the [engineering status](docs/ENGINEERING_STATUS.md) before production adoption.
 
 ## ✨ Highlights
 

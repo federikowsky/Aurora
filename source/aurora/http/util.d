@@ -240,6 +240,8 @@ char[] intToBuffer(long value, char[] buffer) @safe @nogc nothrow pure
 /**
  * Build HTTP response directly into buffer.
  * Returns number of bytes written, or 0 if buffer too small.
+ * On failure, bytes inside buffer may have changed; discard that partial output.
+ * Bytes outside buffer are never written.
  * 
  * @nogc - no garbage collection allocations
  */
@@ -256,7 +258,9 @@ size_t buildResponseInto(
     // Helper to write string
     void write(const(char)[] s)
     {
-        if (pos + s.length > buffer.length)
+        // Failure must remain sticky: adding to size_t.max would wrap and allow
+        // a later memcpy before buffer.ptr. Compare remaining capacity instead.
+        if (pos == size_t.max || s.length > buffer.length - pos)
         {
             pos = size_t.max;  // Mark overflow
             return;
