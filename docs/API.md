@@ -28,7 +28,7 @@ Independent live request wrappers are unsafe with the default Wire revision; a t
 
 **Current limitation:** the App runtime preserves status/content type/body but drops other `HTTPResponse` headers. Redirect/cookie/CORS/security-header APIs must not be treated as working end-to-end guarantees. `HTTPResponse`'s map also cannot represent repeated identical header keys. The runtime and response builder are not yet one authoritative output contract. Complete HEAD/204/304/framing semantics require further tests.
 
-The low-level `aurora.http.util.buildResponseInto` has an insufficient-slice memory-safety defect in the inspected default baseline; a fix is only present in the candidate. See B1 in the state register before using this builder.
+The low-level `aurora.http.util.buildResponseInto` returns bytes written, or `0` when capacity is insufficient. Exhaustion is sticky: later fragments cannot resume writing. On failure, bytes inside the supplied slice may have changed and must be discarded; bytes outside it are preserved. The capacity regression tests exercise debug and release. This does not make the helper a complete HTTP response model or establish an input/output aliasing contract. See the revision-qualified evidence in the state register.
 
 ## Middleware and policies
 

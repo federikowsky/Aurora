@@ -1,6 +1,6 @@
 # Current architecture and ownership
 
-Descriptive, not a future specification. Runtime inspected at Aurora `3416660672229179b947e54bf4bfb650309aa38e` and candidate `fdff62d7dc342432bcee3523413199397c98b657` on 4 October 2026. Candidate differences are explicit in [ENGINEERING_STATUS](ENGINEERING_STATUS.md). Code at the checkout revision wins over this map. Principles belong to [NORTH_STAR](NORTH_STAR.md); public behavior and caveats to [API](API.md).
+Descriptive, not a future specification. Runtime inspected at Aurora `3416660672229179b947e54bf4bfb650309aa38e`, documentation baseline `3ef10f35acb701f3c7ee180df5b56482ab2a07b5`, and bounded-writer fix `414d2f83420bdac605cadc5c98338ce61fd6c6f2` on 4 October 2026. The older combined candidate remains separate. Candidate differences are explicit in [ENGINEERING_STATUS](ENGINEERING_STATUS.md). Code at the checkout revision wins over this map. Principles belong to [NORTH_STAR](NORTH_STAR.md); public behavior and caveats to [API](API.md).
 
 ## Request journey
 
@@ -35,7 +35,7 @@ The input buffer is retained through synchronous dispatch; raw accessor and rout
 
 Wire's default parser lease can be reused while an earlier request wrapper is live. The candidate implements independent leases. See the exact revisions and test evidence before inferring which behavior a checkout has.
 
-`HTTPResponse` contains an associative header map and body. Runtime output construction makes another representation/copy. The preallocated builder has a known insufficient-slice defect on the default revision; the candidate fixes it. Duplicate header names, framing authority and complete response output require one tested contract before redesigning representation for speed.
+`HTTPResponse` contains an associative header map and body. Runtime output construction makes another representation/copy. The preallocated builder now keeps capacity exhaustion sticky and returns zero without writing outside its output slice. Partial output on failure must be discarded. Duplicate header names, framing authority and complete response output require one tested contract before redesigning representation for speed.
 
 `Context.hijack()` marks its local state and returns a connection wrapper, but outer cleanup still closes the connection after dispatch. Synchronous use inside a callback is not proof of escaped asynchronous ownership. Server, worker and logger lifecycle ownership must be checked at actual exit paths, not inferred from API names.
 

@@ -52,17 +52,27 @@ jobs:
       - name: Build library
         run: |
           set -o pipefail
-          HOME="$DUB_HOME" dub build --compiler=ldc2 2>&1 | tee artifacts/ci/build-debug.log
+          dub build --compiler=ldc2 2>&1 | tee artifacts/ci/build-debug.log
 
       - name: Build release library
         run: |
           set -o pipefail
-          HOME="$DUB_HOME" dub build --compiler=ldc2 --build=release 2>&1 | tee artifacts/ci/build-release.log
+          dub build --compiler=ldc2 --build=release 2>&1 | tee artifacts/ci/build-release.log
 
       - name: Run unit tests
         run: |
           set -o pipefail
-          HOME="$DUB_HOME" dub test --compiler=ldc2 --config=unittest 2>&1 | tee artifacts/ci/unit-tests.log
+          dub test --compiler=ldc2 --config=unittest 2>&1 | tee artifacts/ci/unit-tests.log
+
+      - name: Check response buffer contract in release mode
+        run: |
+          set -o pipefail
+          ldc2 -O2 -release -enable-inlining -unittest -main -i -Isource \
+            tests/unit/http/response_buffer_test.d \
+            -of=artifacts/ci/response-buffer-test 2>&1 \
+            | tee artifacts/ci/response-buffer-build.log
+          ./artifacts/ci/response-buffer-test 2>&1 \
+            | tee artifacts/ci/response-buffer-test.log
 
       - name: Build documented minimal example
         run: |
@@ -72,7 +82,7 @@ jobs:
       - name: Run HTTP protocol integration tests
         run: |
           set -o pipefail
-          HOME="$DUB_HOME" dub build tests/integration/protocol_probe_server.d --single \
+          dub build tests/integration/protocol_probe_server.d --single \
             --compiler=ldc2 --build=release 2>&1 \
             | tee artifacts/ci/http-protocol-build.log
           python3 tests/integration/http_framing_probe.py \
@@ -82,14 +92,14 @@ jobs:
       - name: Collect release microbenchmark evidence
         run: |
           set -o pipefail
-          HOME="$DUB_HOME" dub run benchmarks/microbench.d --single \
+          dub run benchmarks/microbench.d --single \
             --compiler=ldc2 --build=release 2>&1 \
             | tee artifacts/ci/microbench.log
 
       - name: Collect D-GC allocation evidence
         run: |
           set -o pipefail
-          HOME="$DUB_HOME" dub build benchmarks/allocation_profile.d --single \
+          dub build benchmarks/allocation_profile.d --single \
             --compiler=ldc2 --build=release 2>&1 \
             | tee artifacts/ci/allocation-profile-build.log
           ./benchmarks/aurora_allocation_profile \

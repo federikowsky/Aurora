@@ -1,6 +1,9 @@
 # Change history
 
-## Unreleased — operational re-baseline, 4 October 2026
+## Unreleased — 4 October 2026
+
+- Return immediately when `buildResponseInto` capacity is exhausted to prevent integer-wrap writes before an undersized output slice. Document partial-output semantics; test capacity, framing and ownership in debug/release.
+- Run the bounded-response contract in release in CI, using the configured `DUB_HOME` directly.
 
 - Consolidate product direction, explicit semantics and progressive control in `docs/NORTH_STAR.md`.
 - Establish one current architecture, public-contract guide, validation guide and engineering state.
