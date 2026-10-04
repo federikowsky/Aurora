@@ -255,71 +255,42 @@ size_t buildResponseInto(
 {
     size_t pos = 0;
     
-    // Helper to write string
-    void write(const(char)[] s)
+    // pos always remains within buffer. Stop at the first fragment that cannot
+    // fit, so no sentinel or recovery state can reach pointer arithmetic.
+    bool write(const(char)[] s)
     {
-        // Failure must remain sticky: adding to size_t.max would wrap and allow
-        // a later memcpy before buffer.ptr. Compare remaining capacity instead.
-        if (pos == size_t.max || s.length > buffer.length - pos)
-        {
-            pos = size_t.max;  // Mark overflow
-            return;
-        }
+        if (s.length > buffer.length - pos)
+            return false;
         memcpy(buffer.ptr + pos, s.ptr, s.length);
         pos += s.length;
+        return true;
     }
-    
-    // Status line
+
     auto statusLine = getStatusLine(statusCode);
     if (statusLine !is null)
     {
-        write(statusLine);
+        if (!write(statusLine)) return 0;
     }
     else
     {
-        write("HTTP/1.1 ");
         char[16] numBuf;
-        write(intToBuffer(statusCode, numBuf[]));
-        write(" ");
-        write(getStatusText(statusCode));
-        write("\r\n");
+        if (!write("HTTP/1.1 ") ||
+            !write(intToBuffer(statusCode, numBuf[])) ||
+            !write(" ") || !write(getStatusText(statusCode)) || !write("\r\n"))
+            return 0;
     }
-    
-    if (pos == size_t.max) return 0;
-    
-    // Content-Type header
-    write("Content-Type: ");
-    write(contentType);
-    write("\r\n");
-    
-    if (pos == size_t.max) return 0;
-    
-    // Content-Length header
-    write("Content-Length: ");
+
+    if (!write("Content-Type: ") || !write(contentType) || !write("\r\n"))
+        return 0;
+
     char[20] lenBuf;
-    write(intToBuffer(body_.length, lenBuf[]));
-    write("\r\n");
-    
-    if (pos == size_t.max) return 0;
-    
-    // Connection header
-    if (keepAlive)
-        write("Connection: keep-alive\r\n");
-    else
-        write("Connection: close\r\n");
-    
-    // Server header
-    write("Server: Aurora/0.2\r\n");
-    
-    // End headers
-    write("\r\n");
-    
-    if (pos == size_t.max) return 0;
-    
-    // Body
-    write(body_);
-    
-    if (pos == size_t.max) return 0;
-    
+    if (!write("Content-Length: ") ||
+        !write(intToBuffer(body_.length, lenBuf[])) || !write("\r\n"))
+        return 0;
+
+    if (!write(keepAlive ? "Connection: keep-alive\r\n" : "Connection: close\r\n") ||
+        !write("Server: Aurora/0.2\r\n") || !write("\r\n") || !write(body_))
+        return 0;
+
     return pos;
 }
