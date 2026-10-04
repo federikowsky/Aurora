@@ -1,133 +1,37 @@
-# AGENTS.md
+# Working on Aurora
 
-This guide applies to the entire repository.
+## Read before changing the project
 
-## Project identity
+1. [North Star](docs/NORTH_STAR.md): permanent product and engineering criteria.
+2. [Engineering state](docs/ENGINEERING_STATUS.md): revision-qualified capabilities, evidence, unresolved problems and hypotheses.
+3. [Current architecture](docs/specs.md), [public contracts](docs/API.md) and [validation guide](docs/TEST_REGISTRY.md), as relevant to the task.
 
-Aurora is a D HTTP/1.1 backend framework distributed as a DUB library package named `aurora`. The public user-facing entry point is `import aurora;` plus the high-level `App` API for route registration, middleware registration, and server startup.
+Code, manifests and executable tests are authoritative for implementation. Documentation must describe their limitations, not replace inspection. A candidate branch, successful component test or historical report is not evidence that a fix is integrated or a public contract works end to end. Reacquire GitHub metadata and the actual default branch; pin every repository, dependency, execution and artifact to its revision.
 
-Use repository files as the source of truth when this guide conflicts with code. Keep operational changes bounded and evidence-based.
+## Decision discipline
 
-## Stack and runtime
+Start from the user journey and the observed problem. Prefer small orthogonal primitives, explicit semantics, inspectable behavior and progressively available control. Minimize both exposed complexity and necessary internal machinery. Do not create subsystem boxes, policies or hooks because the North Star mentions them. Do not impose a typed endpoint API, compile-time routing or a runtime rewrite without comparative evidence.
 
-- Language/runtime: D, built with DUB.
-- Package manifest: `dub.json`.
-- Target type: library.
-- Source import root: `source`.
-- Main dependencies in `dub.json`: `vibe-core`, `eventcore`, `mir-algorithm`, `unit-threaded`, `aurora-websocket`, `wire`, and `fastjsond`.
-- Runtime I/O/concurrency: `vibe-core`/`eventcore`; Linux and FreeBSD use a multi-worker `SO_REUSEPORT` path, while macOS and Windows use a single-listener fiber-based path.
-- HTTP parsing: Wire-backed HTTP/1.1 parsing through `aurora.http`.
-- JSON: `fastjsond` integration through `aurora.schema.json`.
+Reevaluate priorities after material findings. Close correctness and memory-safety defects in their owning component; do not follow a historical TODO sequence. Explore credible alternatives, including eliminating the mechanism. Use D, Phobos, runtime, OS and established libraries before substantial custom code. Preserve useful working choices when no better choice is demonstrated.
 
-Prefer LDC for performance-sensitive validation and release builds when available. Use DMD for quick local compile feedback when that is the available compiler.
+Aurora, Wire, FastjsonD and Aurora-WebSocket are the first-party ecosystem. The latter three are permanent strategic dependencies, with evolvable internals/APIs; repair their responsibilities in their repositories. Other dependencies are tools to evaluate, not permanent constraints.
 
-## Public contracts to preserve
+## Authority and safe execution
 
-- `source/aurora/package.d` is the package-level export surface. Do not remove or rename public imports without an explicit compatibility decision.
-- `App` in `source/aurora/app.d` is the primary ergonomic API. Preserve fluent route, middleware, hook, exception-handler, and `listen` behavior unless a task explicitly changes the public API.
-- `Context` in `source/aurora/web/context.d` is the handler and middleware request scope. Treat connection hijacking and streaming ownership rules as sensitive.
-- `Router` in `source/aurora/web/router.d` owns path matching, route composition, path parameters, and route priority.
-- `HTTPRequest` and `HTTPResponse` in `source/aurora/http/package.d` are public HTTP protocol types. Preserve zero-copy/raw accessor behavior and response-building semantics unless intentionally changing the contract.
-- Middleware remains opt-in unless a task explicitly changes default behavior.
+The owner has authorized autonomous engineering, testing, documentation, commits, publication and technically justified integration across these four repositories, including scheduled maintenance. Old read-only reports are historical, not current restrictions. Do not ask again for work already authorized. Respect actual credentials, branch protections and current user instructions; never bypass them. Do not infer authorization for production changes, destructive history rewriting, extraordinary spending or unrelated repositories.
 
-## Architecture map
+Use an isolated branch/worktree and preserve others' changes. An ordinary PR is not required unless repository rules require it. Publish validated, reviewable changes without force-updating shared history. A release is a separate readiness decision: CI success alone does not establish production readiness. Report local/published/integrated/released state separately.
 
-- `source/aurora/app.d` -> high-level application facade over server, router, middleware, hooks, and exception handlers.
-- `source/aurora/runtime/server.d` -> server lifecycle, connection handling, keep-alive loop, request dispatch, response writing, limits, backpressure, and platform runtime selection.
-- `source/aurora/runtime/worker.d` -> Linux/FreeBSD multi-worker coordinator using `SO_REUSEPORT`.
-- `source/aurora/web/router.d` -> radix-tree routing, route parameters, sub-router composition, and route matching.
-- `source/aurora/web/context.d` -> per-request context, middleware storage, response helpers, WebSocket/SSE upgrade and hijack support.
-- `source/aurora/web/middleware/` -> middleware chain and built-in middleware modules.
-- `source/aurora/http/` -> Wire-backed request parsing, response building, URL handling, and form parsing.
-- `source/aurora/schema/` -> schema validation, JSON serialization/deserialization, and schema exceptions.
-- `source/aurora/mem/` -> buffer pools, object pools, and arena allocation utilities.
-- `source/aurora/tracing/`, `source/aurora/logging.d`, `source/aurora/metrics.d`, `source/aurora/config.d` -> observability and configuration support.
-- `examples/` -> runnable usage examples.
-- `tests/` -> unit, integration, real-world, and stress test surfaces.
-- `benchmarks/` -> performance comparison and benchmark entry points.
-- `docs/` -> API reference, architecture/specification material, roadmap, and changelog.
+## Verification and evidence
 
-## Hot paths and performance rules
+Derive commands from manifests/workflows and [TEST_REGISTRY](docs/TEST_REGISTRY.md). For behavioral changes, reproduce the defect first and add a regression check at the failing contract boundary; assertions on helpers alone do not prove socket behavior. Test applicable debug/release paths and failure/cleanup paths. Keep scope proportional; documentation-only edits require link/claim/snippet checks, not indiscriminate performance reruns.
 
-Treat these areas as performance-sensitive:
+For performance-sensitive changes, freeze a representative baseline and falsifier, vary one causal factor, measure correctness plus relevant costs and control workloads, then accept or reject. Record exact command, source/patch identity, dependency pins, clean/dirty state, environment, compiler/build flags, input, warm-up, repetitions, GC/profiler and raw results. Separate D-GC/native/stack/reuse and setup/runtime. Compare only compatible configurations; report dispersion and errors. Never recover a score by restoring incorrect behavior.
 
-- `Server.processConnection`, keep-alive handling, overload checks, timeout handling, and response writes.
-- `ResponseWriter`, `HTTPResponse.buildInto`, and helpers in `aurora.http.util`.
-- `HTTPRequest.parse`, raw query/form/header accessors, and Wire integration.
-- `Router.match`, `PathParams`, `ContextStorage`, and middleware pipeline execution.
-- Buffer and object pooling under `source/aurora/mem/`.
-- Compression, rate limiting, circuit breaker, bulkhead, load shedding, health, security, request-id, validation, and tracing middleware.
+Tag important conclusions MEASURED (execution/artifact), OBSERVED (inspected code/log), INFERRED (reasoning), UNVERIFIED (insufficient evidence). Do not treat a claim in a comment, filename or old report as proof.
 
-Before changing these paths, check allocation behavior, copying, data lifetime, request/connection bounds, and cross-platform behavior. Prefer single-pass parsing, bounded memory growth, and existing optimized primitives over custom rewrites.
+## Keep continuity small
 
-## Sensitive surfaces
+Update the existing document that owns the fact. ENGINEERING_STATUS owns the current scorecard, open problems and decision hypotheses; do not add parallel TODO/roadmap/handoff files. Git history and dated evidence preserve superseded material. Never prepend another competing “current” state above an old current state. Keep durable raw evidence linked by revision and digest where possible. Historical plans confer no priority or permission.
 
-Be especially careful with:
-
-- HTTP parser completion/error handling and upgrade handling.
-- Header/body size limits, read/write/keep-alive timeouts, max requests per connection, and overload/backpressure behavior.
-- WebSocket/SSE `hijack()` and `streamResponse()` connection ownership.
-- CORS defaults, security headers, request IDs, tracing propagation, health endpoints, and metrics visibility.
-- Compression content encoding and response body mutation.
-- Schema deserialization type errors and JSON buffer lifetimes.
-- Platform-specific runtime behavior: Linux/FreeBSD workers versus macOS/Windows single listener.
-- Public package exports and examples referenced from docs.
-
-## Validation commands
-
-Run the strongest relevant subset available for the touched surface.
-
-Basic compile/package checks:
-
-```bash
-dub build
-dub build --build=release
-```
-
-Unit test configurations declared in `dub.json`:
-
-```bash
-dub test --config=unittest
-dub test --config=unittest-cov
-```
-
-Integration/server configurations declared in `dub.json`:
-
-```bash
-dub run --config=test-server
-dub run --config=fiber-test
-```
-
-Example and benchmark commands documented in the README:
-
-```bash
-dub run :minimal_server
-dub run :production_server
-dub run --single benchmarks/server.d --build=release
-./benchmarks/comparison/run_comparison.sh
-```
-
-If a command is unavailable because DUB, a D compiler, or platform dependencies are missing, report that exact limitation instead of claiming validation.
-
-## CI and workflow status
-
-The repository has a minimal GitHub Actions validation baseline in `.github/workflows/ci.yml`. It runs on pushes to `main`, pull requests targeting `main`, and manual dispatch.
-
-The baseline uses LDC on Ubuntu to:
-
-```bash
-dub build --compiler=ldc2
-dub build --compiler=ldc2 --build=release
-dub test --compiler=ldc2 --config=unittest
-```
-
-Treat these checks as the minimum required validation for changes that affect buildable code, DUB configuration, tests, or public exports. Add narrower or stronger checks for touched integration, benchmark, middleware, parser, routing, memory, WebSocket/SSE, or platform-runtime surfaces when relevant.
-
-## Change discipline
-
-- Work on a dedicated branch for repository changes.
-- Keep documentation changes narrow and derived from observed files.
-- Preserve architecture boundaries unless the task explicitly requires changing them.
-- Avoid adding dependencies for marginal convenience.
-- Do not open pull requests unless branch protection, automation, or the task requires one.
-- Merge only when the task author has authorized integration and the relevant validation is satisfied or precisely bounded.
+The main conversation coordinates continuity; the repository must remain sufficient to resume without that conversation. The scheduled task and external context files are entry points to this repository, not independent architectural authorities. At completion reconcile them, report what changed and what remains unknown, and select the next intervention from evidence.

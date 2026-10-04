@@ -1,3 +1,5 @@
+# Legacy experimental image; not the supported CI gate. It tolerates some
+# command failures. See docs/TEST_REGISTRY.md before interpreting results.
 # Aurora HTTP Server - Linux Test Container
 # Tests multi-worker architecture with SO_REUSEPORT
 
@@ -25,7 +27,7 @@ RUN apt-get update && apt-get install -y \
     libc++abi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install LDC 1.38 (latest stable)
+# Install the historical LDC 1.38 image toolchain
 # Detect architecture and download appropriate version
 ENV LDC_VERSION=1.38.0
 RUN ARCH=$(dpkg --print-architecture) && \

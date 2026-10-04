@@ -304,9 +304,10 @@ align(64) struct Context
     /**
      * Hijack the connection for external protocol handling (WebSocket, etc.)
      *
-     * OWNERSHIP: After calling hijack(), the external handler is FULLY
-     * RESPONSIBLE for the connection, including closing it when done.
-     * Aurora will NOT close the connection or send any response.
+     * Intended ownership: the external handler closes the connection.
+     * CURRENT LIMITATION: Server outer cleanup still closes it after handler
+     * return. Complete use synchronously; deferred ownership is not yet safe.
+     * The normal HTTP response is suppressed. See docs/ENGINEERING_STATUS.md.
      *
      * Returns: HijackedConnection wrapper for raw socket access
      * Throws: Exception if already hijacked or connection unavailable
@@ -435,7 +436,7 @@ align(64) struct Context
         {
             response.setHeader("Content-Type", "application/json");
             
-            // Use fastjsond native serialization
+            // Aurora schema serialization; FastjsonD provides JSON parsing.
             import aurora.schema.json : serialize;
             response.setBody(serialize(data));
         }

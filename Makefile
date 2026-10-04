@@ -1,5 +1,5 @@
 # ============================================================================
-# Aurora v1.0.0 - High-Performance HTTP Framework for D
+# Aurora - High-Performance HTTP Framework for D
 # ============================================================================
 #
 # All dependencies (wire, fastjsond, aurora-websocket) are managed by DUB.
@@ -18,7 +18,7 @@ all: build
 
 help:
 	@echo "╔════════════════════════════════════════════════════════════╗"
-	@echo "║        Aurora HTTP Framework v1.0.0 - Build System         ║"
+	@echo "║        Aurora HTTP Framework - Build System         ║"
 	@echo "╚════════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "Usage: make <target>"
@@ -64,7 +64,7 @@ release:
 
 test:
 	@echo "Running tests..."
-	@dub test
+	@dub test --config=unittest
 	@echo "✓ Tests complete"
 
 test-cov:
@@ -117,11 +117,10 @@ clean:
 	@echo "Cleaning build artifacts..."
 	@rm -rf .dub build coverage
 	@rm -f *.lst *.a aurora
-	@rm -f dub.selections.json
 	@echo "✓ Clean complete"
 
 info:
-	@echo "Aurora HTTP Framework v1.0.0"
+	@echo "Aurora HTTP Framework"
 	@echo ""
 	@echo "Dependencies (from dub.json):"
 	@grep -E '^\s+"[a-z-]+":' dub.json | head -10

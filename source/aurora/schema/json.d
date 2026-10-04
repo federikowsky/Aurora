@@ -5,7 +5,7 @@
  * and custom serialization for struct → JSON conversion.
  *
  * Key features:
- * - 10-20x faster parsing than std.json via simdjson
+ * - FastjsonD-backed parsing; performance depends on the measured workload
  * - Zero-copy string access during parsing
  * - Thread-local parser for efficiency
  * - Compile-time struct serialization

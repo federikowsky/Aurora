@@ -64,6 +64,11 @@ jobs:
           set -o pipefail
           HOME="$DUB_HOME" dub test --compiler=ldc2 --config=unittest 2>&1 | tee artifacts/ci/unit-tests.log
 
+      - name: Build documented minimal example
+        run: |
+          set -o pipefail
+          dub build examples/minimal_server.d --single --compiler=ldc2 2>&1 | tee artifacts/ci/minimal-example.log
+
       - name: Run HTTP protocol integration tests
         run: |
           set -o pipefail

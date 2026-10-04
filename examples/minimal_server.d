@@ -1,3 +1,7 @@
+/+ dub.sdl:
+    name "aurora_minimal_server"
+    dependency "aurora" path=".."
++/
 /**
  * Aurora Minimal Server
  * 

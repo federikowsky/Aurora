@@ -1,3 +1,5 @@
+# Historical recipe: missing root lib target/vendor paths. Not a validated
+# entry point; see README.md in this directory.
 # Real-World Tests Makefile
 # Uses pre-built Aurora library from main build
 

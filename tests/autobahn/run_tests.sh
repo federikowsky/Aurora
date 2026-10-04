@@ -1,4 +1,6 @@
 #!/bin/bash
+# Experimental recipe: port/build assumptions currently disagree with fixture.
+# Not evidence of compliance; see docs/TEST_REGISTRY.md.
 # Run Autobahn WebSocket compliance tests for Aurora
 #
 # Prerequisites:

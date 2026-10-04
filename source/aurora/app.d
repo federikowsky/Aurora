@@ -1,7 +1,7 @@
 /**
  * Aurora Application - High-Level API
  *
- * Provides an Express.js-like API for building HTTP servers.
+ * Provides the application-facing API for building HTTP servers.
  * This is a thin wrapper around Server that provides a friendlier interface.
  *
  * Usage:
@@ -198,7 +198,7 @@ class App
     // ========================================
     
     /**
-     * Register a typed exception handler (FastAPI-style)
+     * Register a typed exception handler
      * 
      * Example:
      * ---
