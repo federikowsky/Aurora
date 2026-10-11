@@ -8,12 +8,12 @@ Authoritative GitHub metadata was reacquired on 11 October; all four default bra
 
 | Repository | Default runtime/source inspected | Candidate / selected consumer boundary |
 |---|---|---|
-| Aurora | `d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd` | [PR #4](https://github.com/federikowsky/Aurora/pull/4), `6005d023f5104f90b968b399125b1136d17b8b45`; runtime fix at `47371b9e3df1789b11ff91efce1c35f2ad385316`; **not integrated** |
+| Aurora | `72b9717e44b2f54e4052f7b3621cc292c46d7d8e` (logger lifecycle; integrated after cutoff) | [PR #4](https://github.com/federikowsky/Aurora/pull/4), `6005d023f5104f90b968b399125b1136d17b8b45`; runtime fix at `47371b9e3df1789b11ff91efce1c35f2ad385316`; **not integrated** |
 | Wire | `82b6a5dfd606ebe2ac15c83d9430abdb58aec09b` | Same SHA selected by Aurora; old lease candidate `ced07d5c2c07b1c459b62e4e28e1612df2095ae2` remains separate |
 | FastjsonD | `23a51d692103a0b77cba153afa2994df0c14f4d3` | Same SHA selected by Aurora; no change this cycle |
 | Aurora-WebSocket | `edfbbc6d4e1a7f713a96faa13bebfbb44a51c9d2` | Aurora selects package `1.0.1`, not automatically this HEAD |
 
-This state-only publication does not change the default runtime above. Reacquire refs before work. Exact remaining package versions belong to `dub.selections.json`. The old combined Aurora candidate `fdff62d7dc342432bcee3523413199397c98b657` is historical evidence, not an instruction to merge.
+The logger repair was integrated at `b1a18fa304e1171fc513a14b9c9e414d79625afe` after the reporting cutoff; its runtime source is `72b9717e44b2f54e4052f7b3621cc292c46d7d8e`. Subsequent state-only publication does not change it. Reacquire refs before work. Exact remaining package versions belong to `dub.selections.json`. The old combined Aurora candidate `fdff62d7dc342432bcee3523413199397c98b657` is historical evidence, not an instruction to merge.
 
 **Complete reporting interval: 2026-10-04T17:02:13Z → 2026-10-11T05:28:38Z.** Initial inspection this cycle: 04:56:24Z. The interval starts at default `3416660672229179b947e54bf4bfb650309aa38e` and ends at default `d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd`. Four default commits on 4 October cover documentation, two bounded-writer iterations and CI. Their scoped evidence was already recorded but did not advance the previous complete cutoff. This cycle adds two candidate commits and PR #4; no other updated issues/PRs or new release were found before inspection. Publication/checks after cutoff are explicitly this cycle's output. Complete reporting does not mean every platform, failure mode or benchmark is validated.
 
@@ -34,7 +34,7 @@ MEASURED = execution/artifact; OBSERVED = inspected code/log; INFERRED = reasone
 
 [Earlier state and primary evidence links](https://github.com/federikowsky/Aurora/blob/d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd/docs/ENGINEERING_STATUS.md) preserve the September investigations, 4 October full validation and bounded-writer experiments. They remain historical evidence. In particular, B1 was closed at `414d2f83420bdac605cadc5c98338ce61fd6c6f2`; its release canary/capacity checks passed again this cycle. No claim of exhaustive HTTP correctness follows.
 
-## Current decision: admission ownership, not another subsystem
+## Admission candidate: ownership, not another subsystem
 
 **OBSERVED:** the old `scope(exit)` belongs to the admission `if` block and releases before dispatch. The atomic counter already belongs to the Server; a comment incorrectly describes a per-worker limit. **MEASURED:** the socket reproduction confirms the consequence.
 
@@ -44,7 +44,21 @@ Tests cover worker settings 1/2, limits 0/1/2, held handlers, burst 16 with limi
 
 **Decision: published, not integrated.** Functional gates pass. An adverse local HTTP signal remains causally unresolved; the hosted comparison is also dispersed. A successful benchmark job is evidence collection, not a performance gate. No new permission is needed; the remaining constraint is technical evidence. Default users still have B4. No release was made.
 
+## New evidence changed the decision: logger lifecycle
+
+A fresh [default CI](https://github.com/federikowsky/Aurora/actions/runs/38115141628) at documentation-only `21565760ba787cbc268524df0d22abf0940dc797` printed 47 passing modules, then exited with program code -11 / DUB exit 2. Later checks were skipped. **MEASURED:** this is a failed process, not a green suite. [Failure artifact](https://github.com/federikowsky/Aurora/actions/runs/38115141628/artifacts/11692558740), SHA-256 `612e4dda07ea986998691abc94715f4245e6e682db45dee7c5c493dfd109ac0f`.
+
+A minimal release program using only `Logger.get().info()` crashed 11/20 times at implicit exit versus 0/20 with explicit shutdown. **OBSERVED:** singleton state was process-global but its initialization mutex was thread-local; automatic shutdown depended on a GC object destructor while a daemon used GC-managed resources. **INFERRED:** teardown ordering explains the isolated failure; the exact crashing instruction was not acquired.
+
+The separate [logger repair](https://github.com/federikowsky/Aurora/commit/72b9717e44b2f54e4052f7b3621cc292c46d7d8e) assigns construction/destruction and mutex to the shared module, joins/drains the daemon before runtime finalization, and removes the redundant object finalizer. D shared module lifecycle is the existing native mechanism; no new API, shutdown manager or dependency. Log/request hot-path source is unchanged. Explicit shutdown remains supported after producers stop; no logger restart, abrupt-signal or concurrent shutdown/reconfiguration guarantee.
+
+**MEASURED:** final local source passes 400 separate process exit/output checks (50 per unused/implicit/explicit/eight-thread simultaneous-first-access mode, debug and release), library debug/release, 47 modules plus 20 repeated suite exits, protocol 5/5. An earlier intermediate repetition failed unchanged buffer_pool_test.d:293 `Release latency too high` (exit 1, not SIGSEGV); retained, assertion not weakened, causal attribution unknown. Review found no blocking defect after fixture exclusions in both unittest configurations. [Logger CI](https://github.com/federikowsky/Aurora/actions/runs/38115741159) passed 400 further process checks, 47 modules, capacity, protocol and profiles. PR merge `8fdda938555575dda0fbe4bb4b93ab2ff63ca3bc`, candidate `72b9717` and integrated merge `b1a18fa` have identical tree `482c0ded80951721a40f4402ff0e02f2a2ee0aa3`. [Artifact 11692394988](https://github.com/federikowsky/Aurora/actions/runs/38115741159/artifacts/11692394988), digest `f95bb7ec920b3571ebabdf450079141370a8c05e294c168607865830b297e0de`. One fresh CI allocation profile also confirms the same restricted 0/32/384 B/op values; no new HTTP comparison of this runtime was performed.
+
+The normal logger teardown defect is closed in the integrated repair's tested scope. B6's other lifecycle problems remain open. This pivot superseded making performance A/A the immediate next implementation: a reproducible process crash had greater global value to address. No throughput improvement or total lifecycle safety is inferred. [Supplemental raw archive](https://chatgpt.com/api/library/files/libfile_c7cb3bf1f4d88191979145944c8f1e86/download) (owner-authenticated), SHA-256 `f45d4a85f539310208d2d2e39c093162aee610ea1f1cb1f5801972f7c552dd69`, preserves the failure, red/green processes, interim timing failure, final commands, review and downloaded CI artifact.
+
 ## Cost evidence and comparison limits
+
+These measurements compare admission baseline `d5d9be4` with runtime `47371b9` / public candidate `6005d02`, before the separate logger repair. They are not new performance/allocation measurements of `72b9717`.
 
 Local: Linux 6.18.44, KVM x86-64, Intel Xeon Platinum 8573C; 9 visible CPUs, cgroup quota 8 cores, memory limit 8 GiB. Hosted: Ubuntu 24.04/Linux 6.17.0-1022-azure, Microsoft virtualization, AMD EPYC 9V74, 4 CPUs, 15 GiB visible RAM/3 GiB swap; CPU/memory quotas not captured. Both LDC 1.42.0 / DMD 2.112.1 / LLVM 21.1.8 / DUB 1.41.0, release builds. Tracked trees clean for baseline/public candidate; local development builds have the recorded runtime patch; hosted untracked `artifacts/` contains evidence. Default and candidate dependency selections unchanged. Local builds use existing cache, not an empty-cache install.
 
@@ -75,7 +89,7 @@ Allocation profiler: 10,000 warm-up / 100,000 measured iterations, 3 processes p
 | B3 response boundary / Aurora | **OBSERVED:** writer still forwards status/type/body rather than all headers; previous socket failure retained | Header/framing/injection/duplicate/HEAD/204/304/error contracts at socket |
 | B4 admission / Aurora | **MEASURED:** default fails, isolated candidate passes functionality | Resolve candidate timing uncertainty; integrate only with an explicit technical decision |
 | B5 middleware/router / Aurora | **OBSERVED:** Router.use stored but not dispatched; misses bypass global pipeline | Explicit policy/order/miss/subrouter behavior; no new hook family by default |
-| B6 lifecycle / Aurora | **OBSERVED:** hijack outer cleanup, polling and weak startup-failure propagation | Reproduce teardown/ownership failures; historical logger SIGSEGV not rerun this cycle |
+| B6 lifecycle / Aurora | **MEASURED:** normal logger teardown repaired and repeated process checks pass; **OBSERVED:** hijack outer cleanup, polling and weak startup-failure propagation remain | Cancellation/drain/start failure and abrupt/concurrent logger shutdown remain unvalidated |
 | B7 metrics / Aurora | **OBSERVED:** Server writes and WorkerState getter ownership differ; historical live zero count | One accounting owner; request/error/413/431/timeout live assertions |
 | B8 input/errors / Aurora + FastjsonD boundary | **OBSERVED:** silent field failures, separate mapper policies, downstream errors caught as 400 | Explicit input/domain/infrastructure error contract and migration |
 | B9 low-level handler / Aurora | **OBSERVED:** ResponseBuffer passed by value | Output-loss consequence remains **INFERRED** pending socket reproduction |
@@ -87,16 +101,16 @@ Allocation profiler: 10,000 warm-up / 100,000 measured iterations, 3 processes p
 
 | Dimension | Established | Still unknown / deficient |
 |---|---|---|
-| Correctness | **MEASURED:** 47 modules, B1 pass, B4 candidate red/green | B2/B3/B4 default; other dispatch paths |
+| Correctness | **MEASURED:** 47 modules, B1 pass, B4 candidate red/green, logger teardown repair | B2/B3/B4 default; other dispatch paths |
 | Protocol | **MEASURED:** 5 fragmentation/pipeline/retirement/deadline probes | **UNVERIFIED:** exhaustive framing/encoding/upgrade/fuzz compliance |
 | Performance / tail | **MEASURED:** two-environment paired data, explicit errors and dispersion | Causal adverse signal; controlled-arrival p99.9 and useful-load SLOs |
 | CPU efficiency | **MEASURED:** invalid local CPU counter calibration | CPU/request, cycles/instructions, syscall/lock attribution |
 | Memory efficiency | **OBSERVED:** borrowed state/pools; B2 lifetime failure | Native allocation, RSS/connection, retention/exhaustion |
 | Allocation behavior | **MEASURED:** unchanged selected 0/32/384 D-GC B/op | Network, middleware/error, native total; no server-wide zero allocation |
 | Scalability | **MEASURED:** one/two-worker contract tests, four/nine-worker load | Scaling efficiency, fairness, contention |
-| Resilience | **MEASURED:** framing/write timeout; B4 candidate cleanup | Default admission, cancellation, drain/startup failure, soak |
+| Resilience | **MEASURED:** framing/write timeout; B4 candidate cleanup; normal logger module teardown | Default admission, cancellation, drain/startup failure, soak |
 | Security | **MEASURED:** B1 bounds guard regression passes | **UNVERIFIED:** comprehensive audit; lost security headers remain |
-| Observability | **OBSERVED:** metric ownership/lifecycle mismatch | Accurate events, useful diagnostics, off/on overhead |
+| Observability | **MEASURED:** logger normal shutdown fixed; **OBSERVED:** metric ownership mismatch | Accurate events, useful diagnostics, off/on overhead |
 | API quality / DX | **OBSERVED:** small common entry; candidate limit semantics explicit | Correct public contracts before more convenience APIs; user journey measurements |
 | Documentation | **OBSERVED:** canonical owner map retained, links checked | Candidate and default must remain distinct; historical reports not normative |
 | Packaging / release | **OBSERVED:** no Aurora GitHub release; exact selections | Registry packaging/empty-cache delivery and release policy validation |
@@ -108,9 +122,9 @@ Allocation profiler: 10,000 warm-up / 100,000 measured iterations, 3 processes p
 
 The North Star does not select a rewrite or a new subsystem. It increases the value of predictable existing contracts: the current experiment fixes ownership using existing mechanisms. B4 outranked the previous suggested B2 experiment because a bounded, independently testable correction could improve overload correctness, API truth and DX together. Fresh evidence now changes the next decision again.
 
-**Dominant uncertainty:** whether the admission candidate has a material disabled-path cost or whether run/host variability dominates. A second environment reduced neither dispersion nor causal uncertainty sufficiently to claim equivalence. Local /proc accounting is invalid and ptrace is denied; do not fabricate profiling or bypass restrictions.
+**Dominant integration uncertainty after the logger repair:** whether the admission candidate has a material disabled-path cost or whether run/host variability dominates. A second environment reduced neither dispersion nor causal uncertainty sufficiently to claim equivalence. Local /proc accounting is invalid and ptrace is denied; do not fabricate profiling or bypass restrictions.
 
-**Next highest-information action (revisable):** on a runner with valid process CPU accounting, interleave identical-binary A/A controls with pinned A/B, fix worker/client CPU budget and randomize/counterbalance order. Use the public comparison harness; record CPU/request and throughput/tails/errors, verify counter calibration, and preserve exact-byte controls. Falsifier: repeatable candidate-specific degradation larger than A/A dispersion, with attributable CPU or scheduling cost. If confirmed, simplify the scope/cleanup code generation without restoring early release; if falsified with adequate precision, integrate the safety fix. No preset acceptable percentage is retrofitted to these samples. B2 and B3 remain competing high-value correctness repairs once this gate can be decided. No user permission is outstanding.
+The late process failure was investigated and repaired before returning to this question. **Next highest-information action (revisable):** first reconcile the admission branch with the logger-fixed default and rerun its contract gates (the old candidate does not contain the logger fix); then, on a runner with valid process CPU accounting, interleave identical-binary A/A controls with pinned A/B, fix worker/client CPU budget and randomize/counterbalance order. Use the public comparison harness; record CPU/request and throughput/tails/errors, verify counter calibration, and preserve exact-byte controls. Falsifier: repeatable candidate-specific degradation larger than A/A dispersion, with attributable CPU or scheduling cost. If confirmed, simplify the scope/cleanup code generation without restoring early release; if falsified with adequate precision, integrate the safety fix. No preset acceptable percentage is retrofitted to these samples. B2 and B3 remain competing high-value correctness repairs once this gate can be decided. No user permission is outstanding.
 
 ## Historical versus normative state
 
