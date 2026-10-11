@@ -1,152 +1,117 @@
 # Engineering state and North Star scorecard
 
-**Operational re-baseline: 4 October 2026. Readiness: HOLD.** This file is the single current state/decision register. It is not a linear roadmap. [NORTH_STAR](NORTH_STAR.md) is normative direction; [specs](specs.md) describes architecture; [API](API.md) describes existing contracts; [TEST_REGISTRY](TEST_REGISTRY.md) describes executable checks. Source and revision-qualified raw evidence establish implementation truth.
+**Current assessment: 11 October 2026. Production readiness: HOLD.** This is the sole current scorecard and decision register, not a task sequence. [NORTH_STAR](NORTH_STAR.md) and [AGENTS](../AGENTS.md) govern direction and work; [specs](specs.md), [API](API.md) and [TEST_REGISTRY](TEST_REGISTRY.md) describe the current default implementation. Code, selected dependencies and revision-qualified executions establish behavior. Candidate documentation describes its candidate, not the distributed default.
 
-## Revision and publication boundaries
+## Revisions, interval and integration boundary
 
-GitHub metadata was reacquired on 4 October; all four default branches are `main`.
+Authoritative GitHub metadata was reacquired on 11 October; all four default branches are `main`.
 
-| Repository | Current validated runtime baseline | Separately published candidate |
+| Repository | Default runtime/source inspected | Candidate / selected consumer boundary |
 |---|---|---|
-| [Aurora](https://github.com/federikowsky/Aurora) | `414d2f83420bdac605cadc5c98338ce61fd6c6f2` (bounded writer) | `fdff62d7dc342432bcee3523413199397c98b657` on `codex/north-star-contracts-20260927` |
-| [Wire](https://github.com/federikowsky/Wire) | `82b6a5dfd606ebe2ac15c83d9430abdb58aec09b` | `ced07d5c2c07b1c459b62e4e28e1612df2095ae2` on `codex/parser-leases-20260927` |
-| [FastjsonD](https://github.com/federikowsky/Fastjsond) | `23a51d692103a0b77cba153afa2994df0c14f4d3` | None assessed |
-| [Aurora-WebSocket](https://github.com/federikowsky/Aurora-WebSocket) | `edfbbc6d4e1a7f713a96faa13bebfbb44a51c9d2` | None assessed; Aurora selects package `1.0.1`, not automatically repository HEAD |
+| Aurora | `d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd` | [PR #4](https://github.com/federikowsky/Aurora/pull/4), `6005d023f5104f90b968b399125b1136d17b8b45`; runtime fix at `47371b9e3df1789b11ff91efce1c35f2ad385316`; **not integrated** |
+| Wire | `82b6a5dfd606ebe2ac15c83d9430abdb58aec09b` | Same SHA selected by Aurora; old lease candidate `ced07d5c2c07b1c459b62e4e28e1612df2095ae2` remains separate |
+| FastjsonD | `23a51d692103a0b77cba153afa2994df0c14f4d3` | Same SHA selected by Aurora; no change this cycle |
+| Aurora-WebSocket | `edfbbc6d4e1a7f713a96faa13bebfbb44a51c9d2` | Aurora selects package `1.0.1`, not automatically this HEAD |
 
-The documentation baseline is `3ef10f35acb701f3c7ee180df5b56482ab2a07b5`; it did not change runtime behavior. B1 was then isolated, reproduced and closed at `414d2f83420bdac605cadc5c98338ce61fd6c6f2`, without importing the old combined candidate or changing dependency selections. Documentation/CI-only successors do not create a different runtime implementation. Reacquire current refs rather than treating this table as a permanently current HEAD. The old candidate is historical integration evidence, not an instruction to merge it wholesale; its Wire/request-lifetime changes remain separate. Exact other versions belong to `dub.selections.json`.
+This state-only publication does not change the default runtime above. Reacquire refs before work. Exact remaining package versions belong to `dub.selections.json`. The old combined Aurora candidate `fdff62d7dc342432bcee3523413199397c98b657` is historical evidence, not an instruction to merge.
 
-Latest complete validation cutoff: **2026-10-04T17:02:13Z**, covering from **2026-09-27T19:41:59.786058Z**; verification finished by 17:12:42Z. The re-baseline and subsequent bounded-writer experiments are additional, specifically scoped evidence; they do not silently advance the complete validation interval or claim to rerun every resilience/platform check.
+**Complete reporting interval: 2026-10-04T17:02:13Z → 2026-10-11T05:28:38Z.** Initial inspection this cycle: 04:56:24Z. The interval starts at default `3416660672229179b947e54bf4bfb650309aa38e` and ends at default `d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd`. Four default commits on 4 October cover documentation, two bounded-writer iterations and CI. Their scoped evidence was already recorded but did not advance the previous complete cutoff. This cycle adds two candidate commits and PR #4; no other updated issues/PRs or new release were found before inspection. Publication/checks after cutoff are explicitly this cycle's output. Complete reporting does not mean every platform, failure mode or benchmark is validated.
 
 ## Evidence ledger
 
-MEASURED = execution/artifact; OBSERVED = inspected code/log; INFERRED = reasoned consequence; UNVERIFIED = missing evidence. A result applies only to its stated path/revision/environment.
+MEASURED = execution/artifact; OBSERVED = inspected code/log; INFERRED = reasoned consequence; UNVERIFIED = missing evidence. Historical results never silently become fresh tests.
 
-| Evidence | Revision / scope | Result and boundary |
+| Evidence | Exact scope | Result |
 |---|---|---|
-| [Official Aurora CI](https://github.com/federikowsky/Aurora/actions/runs/30260959571) and [artifact](https://github.com/federikowsky/Aurora/actions/runs/30260959571/artifacts/8650892027) | `3416660672229179b947e54bf4bfb650309aa38e`, 27 July | **MEASURED:** debug/release/unit/protocol/profile steps pass. Artifact downloaded and SHA-256 checked on 4 October: `ec418d72aa0ada2197ee7c8f11a7ae2bed1460c9bb78224703c2970dd302d493`. Not current runtime coverage for untested paths. |
-| [4 October raw archive](https://chatgpt.com/api/library/files/libfile_32eb62c4a3288191949348eb51f71a64/download) (owner-authenticated) | `3416660` and old `fdff62d` candidate; Linux x86-64, LDC 1.42.0 / DUB 1.41.0 | **MEASURED:** default debug/release, 46 modules and protocol 5/5; candidate 48 modules. Archive SHA-256 `fd54ad1968a94f8c1e91dc9abaf15904d752721a095d950413bafc5e8606e985`. Raw commands/environment/results included. |
-| Capacity / overlapping request probes, same archive | `3416660` vs `fdff62d`, debug/release where applicable | **MEASURED:** old builder corrupts canary; old candidate passes. Default Wire live requests share mutated parser state; candidate preserves independence. B1 closure is recorded below; B2 is still open. |
-| Socket contract probes, same archive | `3416660`, one/two workers | **MEASURED:** 302 loses custom/Location/Set-Cookie headers; unmatched CORS preflight 404; max-in-flight 1 admits eight overlapping handlers in one-worker probe. |
-| Allocation profile, same archive | `3416660`, five valid processes, selected components | **MEASURED:** parser/raw accessors/router static+inline/builder: 0; method()+path(): 32; HTTPResponse lifecycle/routed-no-I/O: 384 D-GC B/op. Empty first output excluded. No native/E2E zero-allocation claim. |
-| [Candidate Wire CI](https://github.com/federikowsky/Wire/actions/runs/36351309939) | `ced07d5c2c07b1c459b62e4e28e1612df2095ae2` | **MEASURED:** 62 tests and consumer link/run. Release assertion coverage differs from debug; do not equate both automatically. |
-| [Cycle 3 evidence](https://chatgpt.com/api/library/files/libfile_2a12b96dca5881918c24b21127a27264/download) (owner-authenticated) | 27 September local candidate lineage; exact commands/trees in archive | **MEASURED:** paired/factorial performance showed an unresolved adverse signal; no equivalence claim. SHA-256 `7f71436a6ace2157b7f9bfc9bcb3636cc3f4339821630c2ea20295321cb9791c`. |
-| [Documentation baseline CI](https://github.com/federikowsky/Aurora/actions/runs/37226301105) and [artifact](https://github.com/federikowsky/Aurora/actions/runs/37226301105/artifacts/11312142836) | `3ef10f35acb701f3c7ee180df5b56482ab2a07b5`, 4 October | **MEASURED:** all steps including minimal example pass; 46 modules and protocol 5/5. Downloaded artifact digest `7dbebb4c1ad67cda219af3b92f58e2514a8b83624f46770090d2982e4caa766d`. |
-| [Re-baseline / bounded-writer raw archive](https://chatgpt.com/api/library/files/libfile_6895813133708191b72619f4bca899f7/download) (owner-authenticated) | `3ef10f3`, `5fd9e3c`, `414d2f8`; full SHA/tree/commands in manifest | **MEASURED:** source audit, red/green checks, five component repetitions per comparison, two series of three paired HTTP runs. Digest `c2173145d3dd3f0231f4170df99558b6b56fd094a86cfd3469259f1a4c4f57c5`. Includes failures and adverse timing observations. |
-| Bounded-writer regression | `3ef10f3` → sticky `5fd9e3c` → early-return `414d2f8` | **MEASURED:** baseline fails at capacity 17 in debug/release; both fixes pass capacity/framing/canary/mutable-input checks, 47 modules and protocol 5/5. Release assertions use `enforce`. Source signatures stay `@trusted @nogc nothrow`, callable from the test's `@safe` wrapper. |
-| Current documentation/API audit | Source at default and candidate above | **OBSERVED:** 13 Markdown files and 16 support files inspected; public claims, commands, policy dispatch and lifecycle mismatches identified. No new performance conclusion. |
+| [Default CI](https://github.com/federikowsky/Aurora/actions/runs/37228204573), [artifact 11312946809](https://github.com/federikowsky/Aurora/actions/runs/37228204573/artifacts/11312946809) | `d5d9be4`; downloaded/digest checked | **MEASURED:** build/unit/protocol/capacity/profile evidence; artifact SHA-256 `5aae4def74ac533b9f3026fa43f92f9573fb4845104b14b4fde650458be794b2` |
+| Local baseline and red admission test | `d5d9be4`, LDC 1.42.0 | **MEASURED:** 47 modules exit 0; held limit=1 incorrectly admits contender with HTTP 200 instead of 503 |
+| Local candidate validation | Runtime `47371b9`, final test tree `6005d02` | **MEASURED:** debug/release builds; 47 modules; capacity release check; 5 protocol probes; 12 admission scenarios in each debug/release, exit 0 |
+| [Candidate CI](https://github.com/federikowsky/Aurora/actions/runs/38114521922), [functional artifact](https://github.com/federikowsky/Aurora/actions/runs/38114521922/artifacts/11693535421) | PR merge `f979cfff16506cd2c46bdffb243f08de7818e7fe`, tree `c10a895287995a5f097dcd427273e07afcadfb13` exactly equals candidate `6005d02` | **MEASURED:** 47 modules, capacity, minimal example, framing 5/5, admission 12 debug + 12 release; profile steps pass. Artifact digest `9e291e672c9794d8ec6ad45f5936fc8c7e9e8b4ca717e5f25c0a3921f8342c1b` |
+| [Paired HTTP artifact](https://github.com/federikowsky/Aurora/actions/runs/38114521922/artifacts/11692967319) | Exact checkouts `d5d9be4` vs `6005d02`, one hosted runner | **MEASURED:** 3 counterbalanced pairs, 3 endpoints; exact-byte controls; one baseline echo read error, none reported for candidate. Digest `4abe352af1c0753a66c2664c996117a4d368fa4edd403c97c3c4a9401ad32b20` |
+| [Local raw archive](https://chatgpt.com/api/library/files/libfile_b6eb1ad2c6a88191a69f7cb5c99f1fd4/download) (owner-authenticated) | Commands, environment, patches, red/green logs, all timing samples, CI downloads, probe source | **MEASURED:** SHA-256 `366e64f34bc8ea724f1e717b3ea280ef37490e9023905dd1cc71d9e23170816f`; public CI links above remain independently available |
+| Fresh Wire live-request probe | Selected `82b6a5d`, two independent buffers, two live wrappers | **MEASURED:** first `GET /first` becomes `POST /second` after second parse; enforcement fails (program exit 1, DUB exit 2). B2 reconfirmed |
+| Profiling calibration | Current local sandbox | **MEASURED:** busy-loop /proc CPU ticks remain zero; discarded. strace fails `PTRACE_TRACEME: Operation not permitted`; no CPU/request or syscall result |
 
-Owner-authenticated evidence is a continuity aid, not a public downloadable guarantee. Public CI/source links remain independently available. Reproduce unavailable raw evidence before relying on a contested conclusion.
+[Earlier state and primary evidence links](https://github.com/federikowsky/Aurora/blob/d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd/docs/ENGINEERING_STATUS.md) preserve the September investigations, 4 October full validation and bounded-writer experiments. They remain historical evidence. In particular, B1 was closed at `414d2f83420bdac605cadc5c98338ce61fd6c6f2`; its release canary/capacity checks passed again this cycle. No claim of exhaustive HTTP correctness follows.
 
-Additional re-baseline check: **MEASURED**, the new single-file minimal example recipe compiled with LDC 1.42.0 and returned HTTP 200 plus exactly `Hello from Aurora!` over TCP. Initial offline resolution failed because the package cache was incomplete; online resolution/build then succeeded. This is not a fully empty-cache install, portability or lifecycle certification. `make -n clean test` confirms that clean preserves selections and test selects the ordinary unittest configuration. Local Markdown links and whitespace checks pass.
+## Current decision: admission ownership, not another subsystem
 
-## Actual capability map
+**OBSERVED:** the old `scope(exit)` belongs to the admission `if` block and releases before dispatch. The atomic counter already belongs to the Server; a comment incorrectly describes a per-worker limit. **MEASURED:** the socket reproduction confirms the consequence.
 
-| User journey | Implemented mechanism | Present boundary |
-|---|---|---|
-| Define endpoint | App + `ref Context` handler, runtime Router | **OBSERVED:** no automatic domain-typed endpoint binding |
-| Receive HTTP | Incremental framing + Wire parser + borrowed request views | **MEASURED:** selected fragmented/malformed framing checks; parser lifetime defect remains; the isolated output-capacity defect is closed |
-| Select route | Method/static/parameter/wildcard precedence and backtracking | **MEASURED:** unit cases; complete normalization and concurrent mutation **UNVERIFIED** |
-| Decode/validate input | FastjsonD-backed mapper; UDA validation; separate std.json middleware mapper | **OBSERVED:** different defaults/error policies; silent field conversion failure; no unified automatic contract |
-| Apply policy | App middleware pipeline on matched routes | **OBSERVED:** Router.use storage not dispatched; misses bypass global pipeline; auth/RBAC examples are not built-in audited facilities |
-| Produce output | Context helpers and HTTPResponse | **MEASURED:** status/body/content type work in probes, other headers disappear in Server serialization |
-| Upgrade/stream | Context hijack/SSE/WebSocket adapters | **OBSERVED:** post-handler connection ownership is contradicted by outer cleanup; complete live semantics **UNVERIFIED** |
-| Observe/control lifecycle | Hooks, logger, counters, traces, limits, worker coordination | **MEASURED/OBSERVED:** specific metrics/lifecycle/admission defects; module presence does not prove correctness |
-| Install/extend | DUB source graph, small App entry point, advanced public modules | **OBSERVED:** no Aurora GitHub tags/releases at audit; DUB metadata request now blocked by HTTP 403. Clean registry install/support minima **UNVERIFIED** |
+The isolated candidate keeps the reservation until the request iteration exits, covering dispatch and response write; rejected reservations are rolled back before writing 503. Existing D scope guards and `core.atomic` solve the problem. Alternatives considered: duplicate cleanup at each exit (more states/missed-exit risk), new semaphore/scheduler (unnecessary machinery), removing the limit (loses a public protection). No dependency or public API was added. Runtime diff: 11 added / 2 removed lines. Claiming per-worker behavior is replaced by explicit Server-wide semantics in candidate documentation.
 
-## Closed contract and open problems
+Tests cover worker settings 1/2, limits 0/1/2, held handlers, burst 16 with limit 2, exception 500 then reuse, idle keep-alive, pipelining, slow response write and timeout cleanup. They establish permit lifetime, not comprehensive connection admission, cancellation, hijack or scheduler fairness. Multi-worker mode is exercised; socket assignment to each worker is not forced. Review found no blocking correctness defect in this scoped change.
 
-**B1 closed at `414d2f8`:** immediate failure propagation removes sentinel state and prevents the reproduced out-of-slice write. Partial output remains discardable on failure. The change adds no public API or dependency and removes 29 net writer lines relative to the sticky candidate. This is not proof of every response writer, aliasing contract or complete HTTP semantics.
+**Decision: published, not integrated.** Functional gates pass. An adverse local HTTP signal remains causally unresolved; the hosted comparison is also dispersed. A successful benchmark job is evidence collection, not a performance gate. No new permission is needed; the remaining constraint is technical evidence. Default users still have B4. No release was made.
 
-### Cost evidence for the bounded-writer decision
+## Cost evidence and comparison limits
 
-Same local KVM x86-64 instance, AMD EPYC 9V74, 9 vCPU, Linux 6.18.44, LDC 1.42.0 / DUB 1.41.0, release flags; dependencies unchanged. Component runs use five alternating processes, 10,000 warm-up iterations and 1,000,000 timing iterations; allocation profiler uses 100,000 measured iterations with D-GC disabled after collection. All nine D-GC profiles remain identical: selected paths 0, convenience method+path 32, response/routed-no-I/O 384 B/op. Zero collections here does not establish production pause behavior; native allocations are excluded.
+Local: Linux 6.18.44, KVM x86-64, Intel Xeon Platinum 8573C; 9 visible CPUs, cgroup quota 8 cores, memory limit 8 GiB. Hosted: Ubuntu 24.04/Linux 6.17.0-1022-azure, Microsoft virtualization, AMD EPYC 9V74, 4 CPUs, 15 GiB visible RAM/3 GiB swap; CPU/memory quotas not captured. Both LDC 1.42.0 / DMD 2.112.1 / LLVM 21.1.8 / DUB 1.41.0, release builds. Tracked trees clean for baseline/public candidate; local development builds have the recorded runtime patch; hosted untracked `artifacts/` contains evidence. Default and candidate dependency selections unchanged. Local builds use existing cache, not an empty-cache install.
 
-| Microbenchmark, median ns/op | Baseline `3ef10f3` | Final `414d2f8` | CV baseline / final |
-|---|---:|---:|---:|
-| Preallocated builder | 20.58 | 22.02 | 4.1% / 3.7% |
-| HTTPResponse lifecycle | 309.72 | 386.78 | 7.4% / 5.4% |
-| Routed request, no I/O | 355.46 | 427.50 | 6.1% / 3.7% |
+HTTP: canonical server, 9 local / 4 hosted workers, admission limits disabled, client/server share host; wrk `a211dd5a7050b1f9e8a9870b95513060e72ac4a0`, 4 threads/100 connections, 3 s warm-up + 10 s measurement, restart each variant; no CPU isolation/affinity. Plaintext, JSON, 1 KiB echo; separate plaintext and 64 KiB binary echo equality controls pass. Normal runtime GC; no allocation profiler on HTTP. Latency is closed-loop, not an overload SLO. Local pairs 1–3 accepted; pair 0 excluded for overlapping functional tests, raw retained. Hosted order alternates across 3 pairs. Environments are **NON-COMPARABLE** with one another or previous weekly runners.
 
-**MEASURED, INDICATIVE:** adverse component timing signals are retained, including an unchanged lifecycle path. They are not dismissed as proven environmental noise, nor causally attributed to this guard. The first sticky variant measured builder 20.00 → 21.70 ns/op in its own paired series. Neither variant has proved timing equivalence or Pareto performance improvement.
-
-HTTP uses the unchanged canonical server (9 workers, admission limits disabled), wrk `a211dd5a7050b1f9e8a9870b95513060e72ac4a0`, 4 client threads/100 connections, 5 s warm-up and 10 s measurement, three alternating pairs with server restarts. Client/server share the VM; no affinity/isolation; closed-loop latency is not a saturation-SLO measurement. `/echo` uses a 1 KiB POST; separate exact-byte controls include a 64 KiB binary body.
-
-| Endpoint | Baseline median req/s | Final median req/s | Baseline / final median p99, ms | Baseline / final median p99.9, ms |
+| Environment / endpoint | Baseline / candidate median req/s | CV % baseline / candidate | Median p99 ms baseline / candidate | Median p99.9 ms baseline / candidate |
 |---|---:|---:|---:|---:|
-| `/` | 170934.34 | 168856.22 | 28.421 / 13.350 | 54.402 / 85.774 |
-| `/json` | 127989.21 | 132349.80 | 20.854 / 22.224 | 66.246 / 40.553 |
-| `/echo` | 185776.83 | 193654.38 | 48.394 / 41.128 | 88.982 / 266.278 |
+| Local `/` | 92233.29 / 67878.95 | 10.62 / 15.27 | 20.630 / 44.877 | 67.621 / 72.393 |
+| Local `/json` | 82320.11 / 47722.39 | 6.24 / 33.01 | 27.983 / 59.620 | 74.615 / 89.042 |
+| Local `/echo` | 110047.62 / 73738.46 | 9.80 / 33.57 | 26.798 / 97.850 | 68.588 / 190.189 |
+| Hosted `/` | 91336.09 / 92082.73 | 22.50 / 28.97 | 6.846 / 8.120 | 11.518 / 13.663 |
+| Hosted `/json` | 87461.97 / 84289.79 | 22.74 / 26.05 | 6.872 / 6.383 | 11.309 / 10.826 |
+| Hosted `/echo` | 114827.74 / 111308.94 | 15.72 / 24.77 | 5.272 / 5.478 | 8.302 / 7.871 |
 
-**MEASURED:** final comparison completes 29,506,271 requests, zero reported socket/status errors, and exact-byte controls pass. The earlier sticky comparison has one read error. **UNVERIFIED:** causal throughput/tail regression magnitude; timing directions and tails vary substantially, including for the same baseline binary. No percentage improvement is claimed. CPU/request, RSS, native allocations and scaling were not established. The bounded-write safety/contract is accepted; performance diagnosis remains open and production readiness stays HOLD.
+**MEASURED, INDICATIVE:** accepted local samples total 14,084,738 requests, no reported socket/status errors. Excluded pair 0 has two read errors. Three reverse-order plaintext controls still vary: candidate/base 39387/82026, 50882/85382, 90858/65967 req/s. Hosted echo has one baseline read error. These are neither evidence of timing equivalence nor proof the guard causes the slowdown. No regression percentage or improvement is asserted. Raw p50/p95, individual samples and errors are retained.
 
-### Open problems and discriminating evidence
+Components: three alternating processes per variant; 10,000 warm-up / 1,000,000 timing iterations; no I/O. Median ns/op baseline→candidate: static router 47.21→45.05, parameter router 91.12→90.54, Context 12.00→12.82, builder 27.22→27.12, response lifecycle 518.04→456.64, routed-no-I/O 550.21→521.08. **INDICATIVE:** these do not execute admission and cannot clear its end-to-end gate.
 
-These are current findings, not an execution sequence. Reconfirm against the next inspected SHA.
+Allocation profiler: 10,000 warm-up / 100,000 measured iterations, 3 processes per variant, GC.collect before measurement and GC disabled during it. All six outputs agree: parser core, keep-alive flag, raw accessors, static/inline-parameter router and preallocated builder **0 D-GC B/op**; convenience method()+path() **32**; response lifecycle and routed-no-I/O **384**. **MEASURED**, restricted scope only. Setup/warm-up/network/logging/exceptions/native allocation/pool misses excluded; zero collections with GC disabled does not prove production pause freedom. LDC is AOT; no JIT claim, no cross-compiler guarantee.
 
-| ID / owner | Finding / evidence strength | Closure evidence |
+## Actual capabilities and remaining contract gaps
+
+| Area / owner | Current evidence | Closure requirement / unknown |
 |---|---|---|
-| B2 Wire | **MEASURED:** simultaneous live request wrappers alias native parser state; candidate lease fix exists | Validate selected public pin, consumer lifetime/failure/cleanup and native costs; integrate in owning repository then consumer |
-| B3 Aurora response boundary | **MEASURED:** application headers lost in success and error paths | Complete response contract at socket, framing/header precedence/injection/duplicates/lifetime; control payload and allocation measurements |
-| B4 Aurora admission | **MEASURED:** configured limit ineffective; **OBSERVED:** scope-exit releases before dispatch | Hold reservation for defined request lifetime; verify concurrent rejection, every exit/error, reuse and disabled cost |
-| B5 Aurora middleware | **OBSERVED:** scoped middleware unused; unmatched requests bypass global pipeline | Explicit composition/miss semantics and live policy/order tests; no new hook family by default |
-| B6 Aurora lifecycle | **OBSERVED:** hijack outer close, polling coordination and weak startup failure propagation; historical logger SIGSEGV **MEASURED** at `3416660` in the [13 September archive](https://chatgpt.com/api/library/files/libfile_78e3f51376b0819191ea59caa987559e/download), not rerun in this audit | Ownership and stop/drain/start-failure tests; reproduce logger with stack before attributing exact cause |
-| B7 Aurora metrics | **MEASURED** historically: multi-worker request getter stays zero; **OBSERVED:** readers/writers use different counters | One authoritative accounting path and live request/error/rejection/timeout assertions |
-| B8 Aurora input/errors | **OBSERVED:** silent field failures, two mapper policies, duplicate exceptions, middleware catches downstream errors as 400 | Explicit strict/default/null/overflow/error contract and migration; preserve domain failures |
-| B9 Aurora low-level handler | **OBSERVED:** ResponseBuffer passed by value and caller reads original | **INFERRED:** simple-handler output can be lost; socket reproduction required before claiming runtime failure |
-| B10 tooling/coverage | **OBSERVED:** legacy config paths, Docker failures tolerated, Autobahn port/build mismatch, dormant candidate hooks | Repair the selected workflow/fixture with actual execution; do not count dormant scripts as coverage |
+| Endpoint/API/DX | **OBSERVED:** App + ref Context, runtime router; no automatic domain-typed binding | Preserve the working common path; do not add fictional APIs to match aspirations |
+| B1 output capacity / Aurora | **MEASURED:** bounded writer integrated, fresh release check passes | Not a proof of every aliasing/framing contract |
+| B2 request lifetime / Wire | **MEASURED:** fresh two-live-request alias reproduction at selected SHA | Owner-level independent leases, cleanup/failure/native cost and selected consumer pin |
+| B3 response boundary / Aurora | **OBSERVED:** writer still forwards status/type/body rather than all headers; previous socket failure retained | Header/framing/injection/duplicate/HEAD/204/304/error contracts at socket |
+| B4 admission / Aurora | **MEASURED:** default fails, isolated candidate passes functionality | Resolve candidate timing uncertainty; integrate only with an explicit technical decision |
+| B5 middleware/router / Aurora | **OBSERVED:** Router.use stored but not dispatched; misses bypass global pipeline | Explicit policy/order/miss/subrouter behavior; no new hook family by default |
+| B6 lifecycle / Aurora | **OBSERVED:** hijack outer cleanup, polling and weak startup-failure propagation | Reproduce teardown/ownership failures; historical logger SIGSEGV not rerun this cycle |
+| B7 metrics / Aurora | **OBSERVED:** Server writes and WorkerState getter ownership differ; historical live zero count | One accounting owner; request/error/413/431/timeout live assertions |
+| B8 input/errors / Aurora + FastjsonD boundary | **OBSERVED:** silent field failures, separate mapper policies, downstream errors caught as 400 | Explicit input/domain/infrastructure error contract and migration |
+| B9 low-level handler / Aurora | **OBSERVED:** ResponseBuffer passed by value | Output-loss consequence remains **INFERRED** pending socket reproduction |
+| B10 tooling/portability | **OBSERVED:** legacy paths/dormant tools; ordinary CI covers LDC/Linux | Clean install, alternative compiler/OS, stress/realworld/Autobahn are **UNVERIFIED** |
 
-`queueRequest` remains a TODO with 503 fallback; compression's gzip branch uses zlib framing; buffer retention, optional-feature overhead and full security/compliance remain open. These source findings must not be advertised as complete capabilities.
+`queueRequest` remains a TODO/503 fallback; the gzip branch's zlib framing finding remains open. No complete security audit, sustained overload, trace propagation or enabled/disabled observability cost has been established. Source inspection is not a fresh end-to-end test of these defects.
 
 ## Multidimensional scorecard
 
-| Dimension | Established evidence | Dominant unknown / next useful discriminator |
+| Dimension | Established | Still unknown / deficient |
 |---|---|---|
-| Correctness | **MEASURED:** unit/probe passes; B1 closed; B2–B4 failures remain | Whether all public dispatch paths preserve their contracts |
-| Protocol | **MEASURED:** five framing/deadline probes | **UNVERIFIED:** comprehensive HTTP/upgrade/fuzz/differential compliance |
-| Performance | **MEASURED:** component and HTTP samples; candidate adverse signal | **UNVERIFIED:** comparable production workload superiority / causal regression |
-| Tail behavior | **MEASURED:** existing wrk distributions/errors | **UNVERIFIED:** controlled arrivals, p99.9, overload SLOs |
-| CPU efficiency | **OBSERVED:** polling, copies, repeated representations | Valid attribution; 4 October /proc CPU accounting was invalid and excluded |
-| Memory efficiency | **OBSERVED:** per-thread pools, borrowed views, native parser leases | **UNVERIFIED:** RSS/connection, retention, churn and exhaustion |
-| Allocation behavior | **MEASURED:** selected 0/32/384 D-GC B/op | Native + network + middleware/error total; no whole-server zero allocation |
-| Scalability | **MEASURED:** traffic on multi-worker configurations | **UNVERIFIED:** scaling efficiency, fairness, contention |
-| Resilience | **MEASURED:** timeout/retirement checks; ineffective admission | B4/B6, cancellation, drain, sustained failures |
-| Security | **MEASURED:** reproduced bounds defect now closed; missing security headers remain | **UNVERIFIED:** complete audit, dependency vulnerabilities, exploitation scope |
-| Observability | **OBSERVED/MEASURED:** counters/lifecycle diverge | Accurate events and enabled/disabled overhead |
-| API quality | **OBSERVED:** small App entry point; contract gaps | Semantics and safe ownership before new convenience APIs |
-| Developer experience | **OBSERVED:** obsolete commands and fictional API removed from guides | Clean install-to-service, inspection, diagnosis and migration measured with users |
-| Documentation | **OBSERVED:** one source map; historical plans retired | Keep docs/code synchronized by executable examples and contract checks |
-| Packaging/release | **OBSERVED:** no Aurora tag/release; exact dependency selections | **UNVERIFIED:** public package delivery, clean toolchain matrix |
-| Compatibility | **MEASURED:** LDC 1.42 / Linux x86-64 evidence | Other compilers/platforms, versioned public API policy |
-| Ecosystem readiness | **OBSERVED:** four first-party owners and dependencies mapped | Consumer integration/release path, actual adoption, third-party interoperability |
-| Technical debt | **OBSERVED:** dormant knobs/scripts and lifetime issues | Close verified contract gaps before expanding surface |
-| Accidental complexity | **OBSERVED:** duplicated response/counter/input models | **INFERRED:** single ownership can remove mechanisms; prove each change separately |
+| Correctness | **MEASURED:** 47 modules, B1 pass, B4 candidate red/green | B2/B3/B4 default; other dispatch paths |
+| Protocol | **MEASURED:** 5 fragmentation/pipeline/retirement/deadline probes | **UNVERIFIED:** exhaustive framing/encoding/upgrade/fuzz compliance |
+| Performance / tail | **MEASURED:** two-environment paired data, explicit errors and dispersion | Causal adverse signal; controlled-arrival p99.9 and useful-load SLOs |
+| CPU efficiency | **MEASURED:** invalid local CPU counter calibration | CPU/request, cycles/instructions, syscall/lock attribution |
+| Memory efficiency | **OBSERVED:** borrowed state/pools; B2 lifetime failure | Native allocation, RSS/connection, retention/exhaustion |
+| Allocation behavior | **MEASURED:** unchanged selected 0/32/384 D-GC B/op | Network, middleware/error, native total; no server-wide zero allocation |
+| Scalability | **MEASURED:** one/two-worker contract tests, four/nine-worker load | Scaling efficiency, fairness, contention |
+| Resilience | **MEASURED:** framing/write timeout; B4 candidate cleanup | Default admission, cancellation, drain/startup failure, soak |
+| Security | **MEASURED:** B1 bounds guard regression passes | **UNVERIFIED:** comprehensive audit; lost security headers remain |
+| Observability | **OBSERVED:** metric ownership/lifecycle mismatch | Accurate events, useful diagnostics, off/on overhead |
+| API quality / DX | **OBSERVED:** small common entry; candidate limit semantics explicit | Correct public contracts before more convenience APIs; user journey measurements |
+| Documentation | **OBSERVED:** canonical owner map retained, links checked | Candidate and default must remain distinct; historical reports not normative |
+| Packaging / release | **OBSERVED:** no Aurora GitHub release; exact selections | Registry packaging/empty-cache delivery and release policy validation |
+| Compatibility | **MEASURED:** LDC 1.42/Linux x86-64 | DMD/other platforms/version minima **UNVERIFIED** |
+| Ecosystem readiness | **OBSERVED:** first-party ownership and selected revisions explicit | Integrated lease contract, consumer compatibility, real adoption |
+| Debt / accidental complexity | **OBSERVED:** duplicated representation/accounting/input state | Eliminate causes, not add compensating layers |
 
-## Decisions and current hypotheses
+## Decision and next discriminator
 
-**Confirmed direction:** preserve App/Context as the current common path; preserve first-party dependencies; keep existing framer/router/runtime until evidence justifies replacement; distinguish raw borrowing from convenience ownership. This is not a claim these components are optimal.
+The North Star does not select a rewrite or a new subsystem. It increases the value of predictable existing contracts: the current experiment fixes ownership using existing mechanisms. B4 outranked the previous suggested B2 experiment because a bounded, independently testable correction could improve overload correctness, API truth and DX together. Fresh evidence now changes the next decision again.
 
-**Changed by the DX mandate:** public availability is not capability completion. A small API with implicit wrong behavior is not simple. Correctness at response/policy/lifetime boundaries can improve capability, safety, DX and inspectability simultaneously, without adding a subsystem. Do not implement fictional documented APIs to rescue stale documentation.
+**Dominant uncertainty:** whether the admission candidate has a material disabled-path cost or whether run/host variability dominates. A second environment reduced neither dispersion nor causal uncertainty sufficiently to claim equivalence. Local /proc accounting is invalid and ptrace is denied; do not fabricate profiling or bypass restrictions.
 
-**Open alternatives:** reuse a complete existing response serializer versus converge writers on a shared bounded primitive; initialization-time policy composition versus runtime composition; explicit strict input entry point versus a versioned stricter default; existing event/synchronization primitives versus continued polling. None is selected merely by this list. Runtime/router rewrites and new subsystem catalogs lack discriminating evidence.
+**Next highest-information action (revisable):** on a runner with valid process CPU accounting, interleave identical-binary A/A controls with pinned A/B, fix worker/client CPU budget and randomize/counterbalance order. Use the public comparison harness; record CPU/request and throughput/tails/errors, verify counter calibration, and preserve exact-byte controls. Falsifier: repeatable candidate-specific degradation larger than A/A dispersion, with attributable CPU or scheduling cost. If confirmed, simplify the scope/cleanup code generation without restoring early release; if falsified with adequate precision, integrate the safety fix. No preset acceptable percentage is retrofitted to these samples. B2 and B3 remain competing high-value correctness repairs once this gate can be decided. No user permission is outstanding.
 
-**Current decision after evidence:** B1 was selected and closed before adding capability. Between sticky sentinel repair and immediate failure propagation, the latter has a simpler invariant and less machinery; neither is advertised as a measured throughput improvement. A full serializer replacement or duplicate capacity pre-pass would enlarge this repair without evidence of net benefit.
+## Historical versus normative state
 
-**Next discriminating intervention:** isolate Wire request-lease correctness/cost against the now-bounded Aurora runtime, using simultaneous live consumer requests and native allocation/lifetime evidence. B2 already has a reproducible failure and an owner-level candidate; the older combined-candidate performance signal is not a reason to accept aliasing or to merge blindly. B3 response headers and B4 admission remain competing high-value contract repairs. Reevaluate after that evidence, not after a fixed task sequence.
-
-## Historical evidence, superseded direction and document inventory
-
-The immutable [baseline tree](https://github.com/federikowsky/Aurora/tree/3416660672229179b947e54bf4bfb650309aa38e) preserves every replaced original. No evidence needs a duplicate `docs/history` tree.
-
-| Files | Disposition / authority |
-|---|---|
-| README, AGENTS | Rewritten entry point and working rules; no duplicated architecture/results catalog |
-| docs/specs.md, docs/API.md, docs/TEST_REGISTRY.md | Replaced mixed historical claims with current architecture, contracts and execution guidance |
-| [plan.md](https://github.com/federikowsky/Aurora/blob/3416660672229179b947e54bf4bfb650309aa38e/plan.md), [ROADMAP](https://github.com/federikowsky/Aurora/blob/3416660672229179b947e54bf4bfb650309aa38e/docs/ROADMAP.md) | Removed from current tree; historical intent only, no normative priorities |
-| CHANGELOG | Current unreleased changes; earlier release prose linked as historical claims, not verified releases |
-| examples/README, benchmarks/README, benchmarks/comparison/README, tests/realworld/README | Narrow local guidance; unsupported recipes/results explicitly historical |
-| .github/validation-trigger.txt, .gitmodules | Retired stale trigger/submodule metadata; no gitlinks existed, DUB is dependency authority |
-| DUB manifests, workflows, tests, source | Executable authority for versions/selection/behavior; known stale paths and coverage limits remain explicit |
-| Makefile, legacy Docker/realworld/Autobahn tools | Build convenience or experimental tools, not independent release/test authority |
-| External North Star and scorecard entry files | Redirect to this repository; no competing normative copy or appended “current” histories |
-
-Dated reports, old checkout instructions and previous roadmap choices are **historical evidence**. Hypotheses above are **open**, not decisions. The North Star/AGENTS are **normative**; code plus tests are **current implementation truth**. A later result can invalidate a hypothesis or supersede an implementation description without rewriting historical raw measurements.
+[Prior canonical state](https://github.com/federikowsky/Aurora/blob/d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd/docs/ENGINEERING_STATUS.md) retains the document audit, old raw artifact references and superseded decisions. Deleted plan/ROADMAP material remains in Git history. No parallel history tree, new roadmap, subsystem catalog or competing scorecard is introduced. External North Star/state files are entry points only. Reacquire source, rerun contested evidence and update this owner when findings change.
