@@ -1,6 +1,8 @@
 # Change history
 
-## Unreleased — 4 October 2026
+## Unreleased — 11 October 2026
+
+- Own the process-wide logger mutex and normal shutdown at module scope; join/drain the daemon before runtime finalization. Add debug/release process-exit and concurrent-first-access checks.
 
 - Return immediately when `buildResponseInto` capacity is exhausted to prevent integer-wrap writes before an undersized output slice. Document partial-output semantics; test capacity, framing and ownership in debug/release.
 - Run the bounded-response contract in release in CI, using the configured `DUB_HOME` directly.
