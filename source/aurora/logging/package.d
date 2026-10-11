@@ -193,7 +193,7 @@ class Logger
     // Singleton with double-checked locking
     private __gshared Logger instance;
     private __gshared bool instanceCreated = false;
-    private static Mutex instanceMutex;
+    private __gshared Mutex instanceMutex;
     
     // Configuration
     private shared LogLevel currentLevel = LogLevel.INFO;
@@ -216,9 +216,18 @@ class Logger
     private shared ulong logsDropped = 0;
     private shared ulong syncFallbacks = 0;
     
-    static this()
+    shared static this()
     {
         instanceMutex = new Mutex();
+    }
+
+    shared static ~this()
+    {
+        // This module owns the process-wide singleton. Join its daemon before
+        // runtime/GC finalization can reclaim objects used by the flush thread.
+        // Do not create an unused logger or repeat an explicit shutdown.
+        if (instance !is null && atomicLoad(instance.running))
+            instance.shutdown();
     }
     
     /**
@@ -402,14 +411,6 @@ class Logger
         if (outputFile != stdout && outputFile != stderr)
         {
             outputFile.close();
-        }
-    }
-    
-    ~this()
-    {
-        if (atomicLoad(running))
-        {
-            shutdown();
         }
     }
     

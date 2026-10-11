@@ -59,6 +59,20 @@ jobs:
           set -o pipefail
           dub build --compiler=ldc2 --build=release 2>&1 | tee artifacts/ci/build-release.log
 
+      - name: Check logger process lifecycle
+        run: |
+          set -o pipefail
+          for build in debug release; do
+            flags=""
+            if [ "$build" = release ]; then flags="-O2 -release -enable-inlining"; fi
+            ldc2 $flags -i -Isource tests/fixtures/logger_lifecycle.d \
+              -of="artifacts/ci/logger-$build" 2>&1 \
+              | tee "artifacts/ci/logger-$build-build.log"
+            python3 tests/integration/logger_lifecycle_probe.py \
+              "artifacts/ci/logger-$build" 2>&1 \
+              | tee "artifacts/ci/logger-$build.log"
+          done
+
       - name: Run unit tests
         run: |
           set -o pipefail

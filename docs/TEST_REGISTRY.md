@@ -36,3 +36,16 @@ Unit selection excludes `tests/stress/*`, `tests/realworld/*` and the standalone
 - [Response capacity regressions](../tests/unit/http/response_buffer_test.d) are selected by ordinary unittest and also compiled/run standalone in release by CI. They use `enforce`, so checks survive `-release`. The overlapping-request lifetime regression remains candidate-only; the default suite cannot claim that fix.
 
 For a new behavior fix, add the smallest meaningful executable contract test at the failing boundary, run it red then green, exercise relevant exit/error/reuse paths and link raw results. Test selection must follow risk and information gain, not historical suite size. Never report a timed-out, skipped or assertion-disabled run as a pass.
+
+## Logger process lifecycle
+
+CI builds `tests/fixtures/logger_lifecycle.d` directly with LDC in debug/release, then runs:
+
+```bash
+ldc2 -i -Isource tests/fixtures/logger_lifecycle.d -of=/tmp/aurora-logger-debug
+python3 tests/integration/logger_lifecycle_probe.py /tmp/aurora-logger-debug
+ldc2 -O2 -release -enable-inlining -i -Isource tests/fixtures/logger_lifecycle.d -of=/tmp/aurora-logger-release
+python3 tests/integration/logger_lifecycle_probe.py /tmp/aurora-logger-release
+```
+
+Each build checks 50 separate processes per mode: unused, implicit teardown, explicit shutdown, and synchronized concurrent first access from eight threads. It checks actual exit status and final/worker output counts, not just in-process assertions. This does not cover abrupt termination, daemon application producers or concurrent reconfiguration/shutdown.
