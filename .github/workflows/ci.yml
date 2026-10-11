@@ -89,6 +89,18 @@ jobs:
             ./tests/integration/aurora_protocol_probe_server 2>&1 \
             | tee artifacts/ci/http-protocol-probe.log
 
+      - name: Check request admission in debug and release
+        run: |
+          set -o pipefail
+          for build in debug release; do
+            dub build tests/integration/admission_probe_server.d --single \
+              --compiler=ldc2 --build="$build" 2>&1 \
+              | tee "artifacts/ci/admission-$build-build.log"
+            python3 tests/integration/http_admission_probe.py \
+              ./tests/integration/aurora_admission_probe_server 2>&1 \
+              | tee "artifacts/ci/admission-$build.log"
+          done
+
       - name: Collect release microbenchmark evidence
         run: |
           set -o pipefail

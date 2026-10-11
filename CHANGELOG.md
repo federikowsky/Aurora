@@ -1,5 +1,10 @@
 # Change history
 
+## Unreleased — 11 October 2026
+
+- Retain the Server-wide in-flight reservation through dispatch and response writing; release on request exit and roll back rejected attempts before writing 503.
+- Clarify the total-Server budget and add debug/release socket regressions for overload, cleanup and keep-alive. Configured limits now enforce rejection under load; see `docs/API.md` for compatibility details.
+
 ## Unreleased — 4 October 2026
 
 - Return immediately when `buildResponseInto` capacity is exhausted to prevent integer-wrap writes before an undersized output slice. Document partial-output semantics; test capacity, framing and ownership in debug/release.
