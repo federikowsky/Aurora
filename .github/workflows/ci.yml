@@ -18,6 +18,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  http-comparison:
+    if: github.event_name == 'pull_request'
+    name: Paired HTTP evidence (not a performance gate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DUB_HOME: ${{ github.workspace }}/.ci-http-home
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc-1.42.0
+      - name: Build pinned baseline, candidate and load generator
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/http
+          git rev-parse HEAD | tee artifacts/http/candidate-sha.txt
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git worktree add --detach ../http-baseline "$BASE_SHA"
+          git -C ../http-baseline rev-parse HEAD | tee artifacts/http/base-sha.txt
+          git status --porcelain=v1 > artifacts/http/git-status.txt
+          uname -a > artifacts/http/uname.txt
+          lscpu > artifacts/http/lscpu.txt
+          free -h > artifacts/http/memory.txt
+          ldc2 --version > artifacts/http/ldc.txt
+          dub --version > artifacts/http/dub.txt
+          c++ --version > artifacts/http/cxx.txt
+          (cd ../http-baseline && dub build benchmarks/server.d --single --compiler=ldc2 --build=release) 2>&1 | tee artifacts/http/base-build.log
+          dub build benchmarks/server.d --single --compiler=ldc2 --build=release 2>&1 | tee artifacts/http/candidate-build.log
+          git clone --no-tags https://github.com/wg/wrk.git ../http-wrk
+          git -C ../http-wrk checkout --detach a211dd5a7050b1f9e8a9870b95513060e72ac4a0
+          git -C ../http-wrk rev-parse HEAD > artifacts/http/wrk-sha.txt
+          make -C ../http-wrk -j2 > artifacts/http/wrk-build.log 2>&1
+      - name: Compare with alternating process order
+        run: |
+          set -euo pipefail
+          python3 benchmarks/compare_http.py \
+            ../http-baseline/benchmarks/aurora_benchmark \
+            ./benchmarks/aurora_benchmark ../http-wrk/wrk artifacts/http \
+            | tee artifacts/http/progress.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aurora-http-${{ github.event.pull_request.head.sha }}
+          path: artifacts/http
+          if-no-files-found: error
+
   dub:
     name: DUB build and unit tests (LDC)
     runs-on: ubuntu-24.04
