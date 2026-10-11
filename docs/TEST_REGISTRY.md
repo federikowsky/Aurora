@@ -30,6 +30,8 @@ Unit selection excludes `tests/stress/*`, `tests/realworld/*` and the standalone
 
 ## Additional suites
 
+- [Admission socket probe](../tests/integration/http_admission_probe.py): build `tests/integration/admission_probe_server.d` with the same single-file DUB command as the protocol fixture, then run `python3 tests/integration/http_admission_probe.py ./tests/integration/aurora_admission_probe_server`. Ordinary CI runs it in debug and release. An out-of-band barrier holds handlers while contenders test limits 1/2/disabled, bursts, one/two workers, exception/write-timeout cleanup and keep-alive reuse. Two-worker mode is exercised; the test does not force socket-to-worker assignment. A dynamically selected local port must be free at bind time.
+
 - [HTTP unit tests](../tests/unit/http) and [router tests](../tests/unit/web) cover selected malformed inputs, boundaries, precedence and backtracking. They do not establish full RFC compliance, fuzz coverage or concurrent mutation safety.
 - [Stress tests](../tests/stress) and [realworld fixtures](../tests/realworld/README.md) are experimental and outside ordinary CI. Inspect their dependencies, server assumptions and resource costs before execution.
 - [Benchmarks](../benchmarks/README.md) separate component cost, allocations and network measurements. They are not correctness or readiness substitutes.

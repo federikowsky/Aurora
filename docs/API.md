@@ -48,6 +48,12 @@ These paths are not a unified automatic binding/normalization/validation contrac
 
 App supports typed exception-handler registration and request/response/error/start/stop hooks. Verify actual dispatch ordering in [Server](../source/aurora/runtime/server.d); an API name does not prove every failure invokes it.
 
-`Context.hijack`, streaming/SSE and WebSocket helpers exist, but asynchronous connection handoff is unsafe under the current outer cleanup. Do not assume post-handler ownership transfer is reliable. Request-admission permits and multi-worker metrics have separate open defects. Logger implicit shutdown has a historical crash reproducer; an explicit shutdown workaround is not a proven whole-application lifecycle contract.
+`Context.hijack`, streaming/SSE and WebSocket helpers exist, but asynchronous connection handoff is unsafe under the current outer cleanup. Do not assume post-handler ownership transfer is reliable. Multi-worker metrics have separate open defects. Logger implicit shutdown has a historical crash reproducer; an explicit shutdown workaround is not a proven whole-application lifecycle contract.
 
 Low-level Server, request/response and runtime APIs provide advanced access, with their own contracts and costs. They are not substitutes for fixing misleading high-level semantics. Changes to public behavior need compatibility analysis, explicit migration when breaking, and executable consumer tests.
+
+## Request admission
+
+`ServerConfig.maxInFlightRequests` bounds active HTTP requests **across one Server**, including all its workers. A complete parsed request reserves a place before dispatch and holds it through response writing. Completion, handler errors, write errors/timeouts and dispatch exit release it. Idle keep-alive connections and incomplete reads do not occupy a request place; connection/read limits remain separate. `0` disables this limiter. Excess requests receive 503 with `Retry-After` and connection close, without invoking the handler. The temporary atomic reservation is rolled back before the rejection write.
+
+Compatibility: previous code released the place before dispatch and did not enforce the configured limit; a misleading source comment called it per-worker. Applications may now see intended 503 responses under load. Size the configured value as the total Server budget. This repair does not implement `queueRequest`, bound response memory or certify connection-admission and hijack lifecycle contracts.
