@@ -48,7 +48,13 @@ jobs:
           uname -a > artifacts/cost/uname.txt
           lscpu > artifacts/cost/lscpu.txt
           free -h > artifacts/cost/memory.txt
-          cat /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max > artifacts/cost/quotas.txt
+          for metric_file in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max; do
+            if [ -r "$metric_file" ]; then
+              echo "$metric_file: $(cat "$metric_file")"
+            else
+              echo "$metric_file: unavailable; quota UNVERIFIED"
+            fi
+          done > artifacts/cost/quotas.txt
           ldc2 --version > artifacts/cost/ldc.txt
           dub --version > artifacts/cost/dub.txt
           c++ --version > artifacts/cost/cxx.txt
