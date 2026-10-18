@@ -31,3 +31,11 @@ Repeated clients against one server are not independent server forks. Restart/wa
 Before claiming a change: freeze command/workload/falsifier; record SHA and patch/dirty state, host/virtualization, OS/CPU/memory, compiler/runtime/build flags, duration/iterations, threads/connections, GC/profiler and raw output; repeat with dispersion; check held-out workloads and correctness. Use CPU/native allocation/RSS/scaling profiles only when their accounting is valid. Label different environments NON-COMPARABLE; retain unfavorable outcomes and failed measurements.
 
 The old README's numbers are retained in [Git history](https://github.com/federikowsky/Aurora/blob/3416660672229179b947e54bf4bfb650309aa38e/benchmarks/README.md). They are not the current baseline. No benchmark exception permits incorrect framing, memory access or disabled security checks in the product.
+# Explicit resource controls
+
+The canonical server accepts `--workers=N` and `--in-flight=N`. Defaults remain
+auto-detected workers and disabled in-flight admission. Use a worker count matching
+the server CPU budget; these are ordinary `ServerConfig` settings, not alternative
+benchmark-only dispatch paths. Report them alongside affinity/client resources.
+`tests/integration/benchmark_config_probe.py` checks real startup, selected values,
+response bytes and process exit; ordinary CI runs it on the release server.
