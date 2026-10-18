@@ -1,6 +1,9 @@
 # Change history
 
-## Unreleased — 11 October 2026
+## Unreleased — 18 October 2026
+
+- Hold Server-wide request admission through dispatch and response writing; roll back rejection before writing 503. Previously the configured limit was ineffective. Applications must size it as a total Server budget, not per-worker. Add debug/release socket regression coverage.
+- Expose canonical benchmark worker/admission settings and collect controlled A/A–A/B evidence with process CPU, output checks and raw errors.
 
 - Own the process-wide logger mutex and normal shutdown at module scope; join/drain the daemon before runtime finalization. Add debug/release process-exit and concurrent-first-access checks.
 

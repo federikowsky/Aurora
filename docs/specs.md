@@ -10,14 +10,14 @@ Descriptive, not a future specification. Runtime inspected at Aurora `3416660672
 4. [Router](../source/aurora/web/router.d) matches method/path and extracts parameters. `handleWithRouter` creates a per-request `Context` and `HTTPResponse`, invokes hooks and, only after a successful match, the global pipeline and handler.
 5. [Context](../source/aurora/web/context.d) exposes borrowed request/response pointers, parameters, small storage and response/upgrade helpers. Domain work remains in the handler. JSON decoding, validation and serialization are explicit calls today, not an automatic typed-input pipeline.
 6. `HTTPResponse` accumulates application output. The current runtime reconstructs the wire response from status/content type/body/keep-alive. This loses other response headers; it is an open defect, not intentional semantics.
-7. The writer applies write deadlines; connection code decides keep-alive/retirement, compacts remaining input and cleans up. Hijack and request-admission lifetimes have known defects described in the state register.
+7. The writer applies write deadlines; connection code decides keep-alive/retirement, compacts remaining input and cleans up. An admitted request holds its Server-wide reservation through dispatch and writing, releasing at iteration exit. Hijack has a separate ownership defect described in the state register.
 
 ## Responsibility map
 
 | Owner | Actual responsibility / boundary | Cost or unresolved contract |
 |---|---|---|
 | Aurora App/Router | Registration, selection, parameters, global middleware orchestration | Runtime trie child search; local router middleware is stored but not dispatched |
-| Aurora Server/WorkerPool | Connection lifecycle, message framing, dispatch, deadlines, admission, worker coordination | Duplicated metrics/state; admission scope and shutdown need validation |
+| Aurora Server/WorkerPool | Connection lifecycle, message framing, dispatch, deadlines, admission, worker coordination | Server-wide request reservation; duplicated metrics/state and broader shutdown remain open |
 | Wire | Native HTTP field parser and D request wrapper | Input views are borrowed; published candidate changes native parser lease lifetime |
 | Aurora HTTP/Context | Request conveniences, response representation, per-request application access | Convenience copies/allocations; response model differs from actual output path |
 | FastjsonD | Native JSON document/value parsing used by Aurora's schema mapper | Aurora retains its own template serialization/mapping; separate std.json validation mapper also exists |
@@ -35,7 +35,7 @@ The input buffer is retained through synchronous dispatch; raw accessor and rout
 
 Wire's default parser lease can be reused while an earlier request wrapper is live. The candidate implements independent leases. See the exact revisions and test evidence before inferring which behavior a checkout has.
 
-`HTTPResponse` contains an associative header map and body. Runtime output construction makes another representation/copy. The preallocated builder now keeps capacity exhaustion sticky and returns zero without writing outside its output slice. Partial output on failure must be discarded. Duplicate header names, framing authority and complete response output require one tested contract before redesigning representation for speed.
+`HTTPResponse` contains an associative header map and body. Runtime output construction makes another representation/copy. The preallocated builder returns zero immediately on capacity exhaustion without writing outside its output slice. Partial output on failure must be discarded. Duplicate header names, framing authority and complete response output require one tested contract before redesigning representation for speed.
 
 `Context.hijack()` marks its local state and returns a connection wrapper, but outer cleanup still closes the connection after dispatch. Synchronous use inside a callback is not proof of escaped asynchronous ownership. Server, worker and logger lifecycle ownership must be checked at actual exit paths, not inferred from API names.
 

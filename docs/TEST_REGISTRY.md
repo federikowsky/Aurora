@@ -30,6 +30,8 @@ Unit selection excludes `tests/stress/*`, `tests/realworld/*` and the standalone
 
 ## Additional suites
 
+- Admission: build `tests/integration/admission_probe_server.d` with the same single-file DUB options as the protocol fixture, then run `python3 tests/integration/http_admission_probe.py ./tests/integration/aurora_admission_probe_server`. CI runs debug/release. Twelve scenarios per build cover one/two workers, limits 0/1/2, bursts, exceptions, write-timeout cleanup, pipelining and keep-alive. Two-worker mode does not force socket placement on separate workers.
+
 - [HTTP unit tests](../tests/unit/http) and [router tests](../tests/unit/web) cover selected malformed inputs, boundaries, precedence and backtracking. They do not establish full RFC compliance, fuzz coverage or concurrent mutation safety.
 - [Stress tests](../tests/stress) and [realworld fixtures](../tests/realworld/README.md) are experimental and outside ordinary CI. Inspect their dependencies, server assumptions and resource costs before execution.
 - [Benchmarks](../benchmarks/README.md) separate component cost, allocations and network measurements. They are not correctness or readiness substitutes.
