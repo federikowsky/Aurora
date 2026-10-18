@@ -1,131 +1,123 @@
 # Engineering state and North Star scorecard
 
-**Current assessment: 11 October 2026. Production readiness: HOLD.** This is the sole current scorecard and decision register, not a task sequence. [NORTH_STAR](NORTH_STAR.md) and [AGENTS](../AGENTS.md) govern direction and work; [specs](specs.md), [API](API.md) and [TEST_REGISTRY](TEST_REGISTRY.md) describe the current default implementation. Code, selected dependencies and revision-qualified executions establish behavior. Candidate documentation describes its candidate, not the distributed default.
+**Current assessment: 18 October 2026. Production readiness: HOLD.** This is the sole current scorecard and decision register, not a task sequence. [NORTH_STAR](NORTH_STAR.md) and [AGENTS](../AGENTS.md) govern direction/work; [specs](specs.md), [API](API.md) and [TEST_REGISTRY](TEST_REGISTRY.md) describe the default. Candidate documentation describes its candidate, not distributed behavior. Code, selected dependencies and pinned executions establish implementation.
 
-## Revisions, interval and integration boundary
+## Revisions and reporting boundary
 
-Authoritative GitHub metadata was reacquired on 11 October; all four default branches are `main`.
+GitHub metadata was reacquired on 18 October; all four actual default branches are `main`.
 
-| Repository | Default runtime/source inspected | Candidate / selected consumer boundary |
+| Repository | Default / selected source | Integration boundary |
 |---|---|---|
-| Aurora | `72b9717e44b2f54e4052f7b3621cc292c46d7d8e` (logger lifecycle; integrated after cutoff) | [PR #4](https://github.com/federikowsky/Aurora/pull/4), `6005d023f5104f90b968b399125b1136d17b8b45`; runtime fix at `47371b9e3df1789b11ff91efce1c35f2ad385316`; **not integrated** |
-| Wire | `82b6a5dfd606ebe2ac15c83d9430abdb58aec09b` | Same SHA selected by Aurora; old lease candidate `ced07d5c2c07b1c459b62e4e28e1612df2095ae2` remains separate |
-| FastjsonD | `23a51d692103a0b77cba153afa2994df0c14f4d3` | Same SHA selected by Aurora; no change this cycle |
+| Aurora | Initial default `87f9ee3f931329f49ff8f2e560613697f540d327`; tooling integrated at `099a466ef222d70b39ee155122cd93df5d41d91d` | [PR #6](https://github.com/federikowsky/Aurora/pull/6) adds canonical benchmark worker/limit controls, no runtime repair. Admission [PR #7](https://github.com/federikowsky/Aurora/pull/7) at `e811528aec5a54e4304729b41180934ec2736201` is **not integrated** |
+| Wire | `82b6a5dfd606ebe2ac15c83d9430abdb58aec09b` | Same SHA selected by Aurora; no change. Old lease candidate `ced07d5c2c07b1c459b62e4e28e1612df2095ae2` is separate, not a merge instruction |
+| FastjsonD | `23a51d692103a0b77cba153afa2994df0c14f4d3` | Same SHA selected; no change |
 | Aurora-WebSocket | `edfbbc6d4e1a7f713a96faa13bebfbb44a51c9d2` | Aurora selects package `1.0.1`, not automatically this HEAD |
 
-The logger repair was integrated at `b1a18fa304e1171fc513a14b9c9e414d79625afe` after the reporting cutoff; its runtime source is `72b9717e44b2f54e4052f7b3621cc292c46d7d8e`. Subsequent state-only publication does not change it. Reacquire refs before work. Exact remaining package versions belong to `dub.selections.json`. The old combined Aurora candidate `fdff62d7dc342432bcee3523413199397c98b657` is historical evidence, not an instruction to merge.
+**Complete reporting interval: 2026-10-11T05:28:38Z → 2026-10-18T04:59:13Z**, default SHA `d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd` → `87f9ee3f931329f49ff8f2e560613697f540d327`. Four default commits after the previous cutoff cover state, the logger repair `72b9717`, its merge `b1a18fa` and state `87f9ee3`. Those were prior-cycle outputs, now included in interval coverage. No later pre-cutoff default commit, newly changed PR/issue or release was found. Publications/checks on 18 October after cutoff are this cycle's output, to include in the next interval. Complete reporting means the declared scope, not certification of all platforms/failure modes.
 
-**Complete reporting interval: 2026-10-04T17:02:13Z → 2026-10-11T05:28:38Z.** Initial inspection this cycle: 04:56:24Z. The interval starts at default `3416660672229179b947e54bf4bfb650309aa38e` and ends at default `d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd`. Four default commits on 4 October cover documentation, two bounded-writer iterations and CI. Their scoped evidence was already recorded but did not advance the previous complete cutoff. This cycle adds two candidate commits and PR #4; no other updated issues/PRs or new release were found before inspection. Publication/checks after cutoff are explicitly this cycle's output. Complete reporting does not mean every platform, failure mode or benchmark is validated.
+Logger normal teardown is already integrated; this cycle does not rediscover it as an open normal-exit defect. [PR #4](https://github.com/federikowsky/Aurora/pull/4) was closed without merge as superseded by #7, preserving its branch/history. PR #7 includes the logger repair; old `6005d02` did not. No release, production operation, first-party dependency update or public API expansion was made. Exact other versions remain in `dub.selections.json`.
 
 ## Evidence ledger
 
-MEASURED = execution/artifact; OBSERVED = inspected code/log; INFERRED = reasoned consequence; UNVERIFIED = missing evidence. Historical results never silently become fresh tests.
+MEASURED = execution/artifact; OBSERVED = inspected source/log; INFERRED = reasoned consequence; UNVERIFIED = insufficient evidence. Historical results are not fresh checks.
 
-| Evidence | Exact scope | Result |
+| Evidence | Pinned scope | Result |
 |---|---|---|
-| [Default CI](https://github.com/federikowsky/Aurora/actions/runs/37228204573), [artifact 11312946809](https://github.com/federikowsky/Aurora/actions/runs/37228204573/artifacts/11312946809) | `d5d9be4`; downloaded/digest checked | **MEASURED:** build/unit/protocol/capacity/profile evidence; artifact SHA-256 `5aae4def74ac533b9f3026fa43f92f9573fb4845104b14b4fde650458be794b2` |
-| Local baseline and red admission test | `d5d9be4`, LDC 1.42.0 | **MEASURED:** 47 modules exit 0; held limit=1 incorrectly admits contender with HTTP 200 instead of 503 |
-| Local candidate validation | Runtime `47371b9`, final test tree `6005d02` | **MEASURED:** debug/release builds; 47 modules; capacity release check; 5 protocol probes; 12 admission scenarios in each debug/release, exit 0 |
-| [Candidate CI](https://github.com/federikowsky/Aurora/actions/runs/38114521922), [functional artifact](https://github.com/federikowsky/Aurora/actions/runs/38114521922/artifacts/11693535421) | PR merge `f979cfff16506cd2c46bdffb243f08de7818e7fe`, tree `c10a895287995a5f097dcd427273e07afcadfb13` exactly equals candidate `6005d02` | **MEASURED:** 47 modules, capacity, minimal example, framing 5/5, admission 12 debug + 12 release; profile steps pass. Artifact digest `9e291e672c9794d8ec6ad45f5936fc8c7e9e8b4ca717e5f25c0a3921f8342c1b` |
-| [Paired HTTP artifact](https://github.com/federikowsky/Aurora/actions/runs/38114521922/artifacts/11692967319) | Exact checkouts `d5d9be4` vs `6005d02`, one hosted runner | **MEASURED:** 3 counterbalanced pairs, 3 endpoints; exact-byte controls; one baseline echo read error, none reported for candidate. Digest `4abe352af1c0753a66c2664c996117a4d368fa4edd403c97c3c4a9401ad32b20` |
-| [Local raw archive](https://chatgpt.com/api/library/files/libfile_b6eb1ad2c6a88191a69f7cb5c99f1fd4/download) (owner-authenticated) | Commands, environment, patches, red/green logs, all timing samples, CI downloads, probe source | **MEASURED:** SHA-256 `366e64f34bc8ea724f1e717b3ea280ef37490e9023905dd1cc71d9e23170816f`; public CI links above remain independently available |
-| Fresh Wire live-request probe | Selected `82b6a5d`, two independent buffers, two live wrappers | **MEASURED:** first `GET /first` becomes `POST /second` after second parse; enforcement fails (program exit 1, DUB exit 2). B2 reconfirmed |
-| Profiling calibration | Current local sandbox | **MEASURED:** busy-loop /proc CPU ticks remain zero; discarded. strace fails `PTRACE_TRACEME: Operation not permitted`; no CPU/request or syscall result |
+| [Initial default CI](https://github.com/federikowsky/Aurora/actions/runs/38116032599), [artifact 11693079041](https://github.com/federikowsky/Aurora/actions/runs/38116032599/artifacts/11693079041) | `87f9ee3`; downloaded/inspected | **MEASURED, historical:** build, 47 modules, logger 400, capacity, protocol 5/5, profiles. SHA-256 `4d62e4ec7a4f2055d57a7c189f21a01a378f6c0441dfe15ac8e545c380d8dd0c` |
+| Canonical benchmark configuration red/green | Initial server ignores flags; tooling source `98b66b158c95a525586d7e26c91b020c76645984` | **MEASURED:** requested worker=1/limit=17, exact plaintext and exit 0 verified after correction; 47 modules pass. Defaults preserved by source inspection |
+| [Tooling CI](https://github.com/federikowsky/Aurora/actions/runs/39099384199) and [integrated CI](https://github.com/federikowsky/Aurora/actions/runs/39099592211) | Source `98b66b1`, integrated `099a466`, same tree `8e8c7772d1ca1022ff0ad0dbcd7a58d75db24afa` | **MEASURED:** both successful |
+| Admission red/green | Baseline runtime `87f9ee3`; candidate runtime published in `2075b4badfa255814ce14542561c0b8f5c24eae3`, CI-only child `e811528` | **MEASURED:** baseline held limit=1 incorrectly returns 200 to contender; candidate passes 12 socket scenarios in each debug/release |
+| [Candidate CI](https://github.com/federikowsky/Aurora/actions/runs/39100030202), [functional artifact 12125758012](https://github.com/federikowsky/Aurora/actions/runs/39100030202/artifacts/12125758012) | Merge `4923588d1b4c4832c961f6c503c50ea51f160cac` and candidate `e811528` share tree `5eb42d2a4b0b08242a6c40bceb5858d0abb6043c` | **MEASURED:** builds, 47 modules, logger 400, release capacity, minimal example, protocol 5/5, admission 12+12, measurement parser 3, profiles pass. Download digest `529d4ef9773900b22de8b6eac4ac1867076a5e386bd95daecb714a5e0dcf0bfa` |
+| [Hosted cost artifact 12126466749](https://github.com/federikowsky/Aurora/actions/runs/39100030202/artifacts/12126466749) | Exact baseline `099a466` vs candidate `e811528` | **MEASURED:** 45 server processes, rotating identical A1/A2 vs B, calibrated wait4. Digest `b3fbaafdd365a3647de3d4a1d4dc62992d54dfca660fb50c38ae0e8bb808589a` |
+| Fresh local gates and costs | Same frozen runtime sources; local development builds preceded publication, hashes/raw patch retained | **MEASURED:** builds, 47 modules exit 0, logger 400, admission 12+12, capacity, protocol 5/5, 3 allocation + 3 microbenchmark processes; 45 two-worker + 27 one-worker HTTP processes |
+| CPU counter validation | Each comparison run; busy child process_time vs Linux wait4 | **MEASURED:** counters agree within 0.1 s; initial 1.2 s child gives 1.2267 s process CPU vs 1.2300 s wait4 CPU. Prior /proc ticks remain discarded, not reused |
 
-[Earlier state and primary evidence links](https://github.com/federikowsky/Aurora/blob/d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd/docs/ENGINEERING_STATUS.md) preserve the September investigations, 4 October full validation and bounded-writer experiments. They remain historical evidence. In particular, B1 was closed at `414d2f83420bdac605cadc5c98338ce61fd6c6f2`; its release canary/capacity checks passed again this cycle. No claim of exhaustive HTTP correctness follows.
+[Dated raw archive](https://chatgpt.com/api/library/files/libfile_a8933294ff688191bc14257f3a36c251/download) (owner-authenticated), SHA-256 `0cb9997c905519732c63a6b8b987546263dfbf857651688c56325ff60663c5fb`, preserves commands, source patches, red/green failures, environment, all local/hosted rows, summaries, diagnostic launcher and downloaded CI artifacts. Public GitHub artifacts above remain the independently accessible primary evidence.
 
-## Admission candidate: ownership, not another subsystem
+The first hosted cost attempt at `2075b4b` failed before measurements because cgroup quota files were absent. CI-only `e811528` records unavailable quotas as UNVERIFIED instead of inventing them; no runtime/harness change. Review also found that errored wrk completions could be mislabeled useful throughput. A red/green 3-test parser check now excludes any warm-up/measurement socket/status errors, retains raw output and fails collection. All 117 primary HTTP server processes were eligible with no reported socket/status errors; separate exact-byte controls pass. Sampling body content is not proof that every measured response body was verified.
 
-**OBSERVED:** the old `scope(exit)` belongs to the admission `if` block and releases before dispatch. The atomic counter already belongs to the Server; a comment incorrectly describes a per-worker limit. **MEASURED:** the socket reproduction confirms the consequence.
+## Decision: admission correctness proven, integration acceptance not cleared
 
-The isolated candidate keeps the reservation until the request iteration exits, covering dispatch and response write; rejected reservations are rolled back before writing 503. Existing D scope guards and `core.atomic` solve the problem. Alternatives considered: duplicate cleanup at each exit (more states/missed-exit risk), new semaphore/scheduler (unnecessary machinery), removing the limit (loses a public protection). No dependency or public API was added. Runtime diff: 11 added / 2 removed lines. Claiming per-worker behavior is replaced by explicit Server-wide semantics in candidate documentation.
+**OBSERVED:** the default reservation guard exits the admission `if` before dispatch. The candidate keeps it in the request iteration through dispatch/write/error exits, rolling back rejected work before 503. The counter is Server-wide, not per-worker. Existing D scope guards and `core.atomic` suffice: 11 added/2 removed runtime lines, no semaphore, scheduler, cleanup registry, dependency or new public API.
 
-Tests cover worker settings 1/2, limits 0/1/2, held handlers, burst 16 with limit 2, exception 500 then reuse, idle keep-alive, pipelining, slow response write and timeout cleanup. They establish permit lifetime, not comprehensive connection admission, cancellation, hijack or scheduler fairness. Multi-worker mode is exercised; socket assignment to each worker is not forced. Review found no blocking correctness defect in this scoped change.
+Tests cover workers 1/2, limits 0/1/2, held handlers, burst 16 with limit 2, exception 500/reuse, idle keep-alive, pipelining and write-timeout cleanup. Multi-worker socket placement is not forced. These do not certify cancellation/hijack/fairness or every overload policy. Candidate API/specs/changelog explain the corrected Server-wide semantics.
 
-**Decision: published, not integrated.** Functional gates pass. An adverse local HTTP signal remains causally unresolved; the hosted comparison is also dispersed. A successful benchmark job is evidence collection, not a performance gate. No new permission is needed; the remaining constraint is technical evidence. Default users still have B4. No release was made.
+Before results, acceptance required correctness, no candidate errors, paired median CPU/request within 5%, and throughput/tail effects no worse than identical-binary A/A variability. **That gate did not pass.** Local two-worker echo and hosted plaintext/echo exceed the CPU criterion. Wide intervals and contradictory one-worker results prevent both causal regression attribution and an equivalence claim. Hosted plaintext peak RSS also shows an adverse signal. Do not silently relax the threshold because CI is green. Default B4 remains open; no permission is pending.
 
-## New evidence changed the decision: logger lifecycle
+Alternatives considered: per-exit cleanup duplication (more missed-exit risk), new semaphore/scheduler (unnecessary mechanism), removing the protection (breaks capability), accepting the patch as cost-free from noisy timing (unsupported). Canonical server options reuse `std.getopt`; wait4, affinity and pinned wrk replace invalid accounting without adding runtime instrumentation.
 
-A fresh [default CI](https://github.com/federikowsky/Aurora/actions/runs/38115141628) at documentation-only `21565760ba787cbc268524df0d22abf0940dc797` printed 47 passing modules, then exited with program code -11 / DUB exit 2. Later checks were skipped. **MEASURED:** this is a failed process, not a green suite. [Failure artifact](https://github.com/federikowsky/Aurora/actions/runs/38115141628/artifacts/11692558740), SHA-256 `612e4dda07ea986998691abc94715f4245e6e682db45dee7c5c493dfd109ac0f`.
+## Controlled cost evidence
 
-A minimal release program using only `Logger.get().info()` crashed 11/20 times at implicit exit versus 0/20 with explicit shutdown. **OBSERVED:** singleton state was process-global but its initialization mutex was thread-local; automatic shutdown depended on a GC object destructor while a daemon used GC-managed resources. **INFERRED:** teardown ordering explains the isolated failure; the exact crashing instruction was not acquired.
+Local: Linux 6.18.55/KVM x86-64, Intel Xeon Platinum 8573C, 9 visible CPUs, quota 8 cores, 8 GiB memory limit/9.8 GiB visible RAM, no swap. Hosted: Ubuntu 24.04/Linux 6.17.0-1022-azure, Microsoft VM, AMD EPYC 7763, 4 logical CPUs (2 cores with SMT), 15 GiB RAM/3 GiB swap; cgroup quotas unavailable. Both LDC 1.42.0, DMD 2.112.1, LLVM 21.1.8, DUB 1.41.0, release `-O2 -release -enable-inlining`; selected packages unchanged. Local cache is populated: no empty-cache-install claim.
 
-The separate [logger repair](https://github.com/federikowsky/Aurora/commit/72b9717e44b2f54e4052f7b3621cc292c46d7d8e) assigns construction/destruction and mutex to the shared module, joins/drains the daemon before runtime finalization, and removes the redundant object finalizer. D shared module lifecycle is the existing native mechanism; no new API, shutdown manager or dependency. Log/request hot-path source is unchanged. Explicit shutdown remains supported after producers stop; no logger restart, abrupt-signal or concurrent shutdown/reconfiguration guarantee.
+Canonical servers: workers 2 on CPUs 0,1; wrk threads 2 on CPUs 2,3, connections 100, separate processes, 2 s warm-up + 5 s measurement, five blocks per environment, rotating A1/B/A2 order. A1/A2 run the exact same executable. The one-worker diagnostic uses CPU 0, three blocks, other settings unchanged. CPU affinity is not physical isolation; hosted CPU 0,1 may share an SMT core. Local/hosted/one-worker timing is **NON-COMPARABLE** across configurations; compare variants only within each matrix. Across weeks, CPU/kernel/worker counts/wrk link configuration also differ.
 
-**MEASURED:** final local source passes 400 separate process exit/output checks (50 per unused/implicit/explicit/eight-thread simultaneous-first-access mode, debug and release), library debug/release, 47 modules plus 20 repeated suite exits, protocol 5/5. An earlier intermediate repetition failed unchanged buffer_pool_test.d:293 `Release latency too high` (exit 1, not SIGSEGV); retained, assertion not weakened, causal attribution unknown. Review found no blocking defect after fixture exclusions in both unittest configurations. [Logger CI](https://github.com/federikowsky/Aurora/actions/runs/38115741159) passed 400 further process checks, 47 modules, capacity, protocol and profiles. PR merge `8fdda938555575dda0fbe4bb4b93ab2ff63ca3bc`, candidate `72b9717` and integrated merge `b1a18fa` have identical tree `482c0ded80951721a40f4402ff0e02f2a2ee0aa3`. [Artifact 11692394988](https://github.com/federikowsky/Aurora/actions/runs/38115741159/artifacts/11692394988), digest `f95bb7ec920b3571ebabdf450079141370a8c05e294c168607865830b297e0de`. One fresh CI allocation profile also confirms the same restricted 0/32/384 B/op values; no new HTTP comparison of this runtime was performed.
+Routes: plaintext Hello World, JSON object, 1 KiB POST echo; extra plaintext/JSON and 64 KiB binary-echo response controls. Native `wait4` CPU includes server startup/control/warm-up/shutdown and all warm+measured requests, not pure steady-state CPU/request. Peak RSS is process high-water KiB, not bytes/connection or native allocation. Latency is closed-loop wrk; raw p50/p95/p99/p99.9 and all rows retained. No controlled-arrival SLO, cycles/instructions, native allocation or power metric.
 
-The normal logger teardown defect is closed in the integrated repair's tested scope. B6's other lifecycle problems remain open. This pivot superseded making performance A/A the immediate next implementation: a reproducible process crash had greater global value to address. No throughput improvement or total lifecycle safety is inferred. [Supplemental raw archive](https://chatgpt.com/api/library/files/libfile_c7cb3bf1f4d88191979145944c8f1e86/download) (owner-authenticated), SHA-256 `f45d4a85f539310208d2d2e39c093162aee610ea1f1cb1f5801972f7c552dd69`, preserves the failure, red/green processes, interim timing failure, final commands, review and downloaded CI artifact.
+wrk source `a211dd5a7050b1f9e8a9870b95513060e72ac4a0`, built with supported `WITH_OPENSSL=/usr` (libssl/libcrypto 3); bundled OpenSSL build failed locally with assembler CFI errors, raw logs retained. No load-generator source change or TLS workload.
 
-## Cost evidence and comparison limits
+| Matrix / route | Paired median CPU B/sqrt(A1*A2) | Approximate 95% interval of paired geometric mean | Paired median throughput ratio |
+|---|---:|---:|---:|
+| Local 2 workers / | 0.972 | 0.847–1.105 | 1.324 |
+| Local 2 workers /json | 0.982 | 0.769–1.253 | 0.997 |
+| Local 2 workers /echo | 1.070 | 0.748–1.546 | 0.984 |
+| Hosted 2 workers / | 1.216 | 0.872–1.357 | 1.146 |
+| Hosted 2 workers /json | 1.000 | 0.817–1.076 | 0.959 |
+| Hosted 2 workers /echo | 1.176 | 0.873–1.392 | 1.168 |
+| Local 1 worker / | 0.956 | 0.777–1.128 | 1.096 |
+| Local 1 worker /json | 0.976 | 0.798–1.259 | 1.083 |
+| Local 1 worker /echo | 0.942 | 0.888–0.984 | 1.044 |
 
-These measurements compare admission baseline `d5d9be4` with runtime `47371b9` / public candidate `6005d02`, before the separate logger repair. They are not new performance/allocation measurements of `72b9717`.
+**MEASURED, INDICATIVE:** local two-worker identical-baseline CPU ratios range 0.452–2.034 on plaintext, 0.977–1.459 on echo. This directly invalidates a precise small-effect claim, not proof of host noise as the cause. Ratios above are not speedup claims; median and interval estimate different statistics. Small samples, non-stationarity, multiple endpoints and no multiplicity correction limit nominal intervals. Hosted plaintext paired peak-RSS ratio median 1.130, geometric-mean interval 1.005–1.272; retain this adverse signal without declaring a leak or proven patch effect.
 
-Local: Linux 6.18.44, KVM x86-64, Intel Xeon Platinum 8573C; 9 visible CPUs, cgroup quota 8 cores, memory limit 8 GiB. Hosted: Ubuntu 24.04/Linux 6.17.0-1022-azure, Microsoft virtualization, AMD EPYC 9V74, 4 CPUs, 15 GiB visible RAM/3 GiB swap; CPU/memory quotas not captured. Both LDC 1.42.0 / DMD 2.112.1 / LLVM 21.1.8 / DUB 1.41.0, release builds. Tracked trees clean for baseline/public candidate; local development builds have the recorded runtime patch; hosted untracked `artifacts/` contains evidence. Default and candidate dependency selections unchanged. Local builds use existing cache, not an empty-cache install.
+Additional GC diagnostics: nine separately instrumented processes at the same sources, one block, normal collector policy and `--DRT-gcopt=profile:1`. Whole-process collection counts A1/B/A2: plaintext 26/23/32, JSON 245/45/317, echo 162/196/201; largest reported pause 31 ms. **MEASURED, INDICATIVE:** GC activity is real in the HTTP path, not proof that GC explains the candidate effect (unequal work, setup/warm-up included, one block). The default environment-only GC option produced no summary and is invalid profiler evidence. Runtime CLI option was verified separately; diagnostic times do not clear the frozen gate or provide B/op. Durable raw results are linked in the dated report.
 
-HTTP: canonical server, 9 local / 4 hosted workers, admission limits disabled, client/server share host; wrk `a211dd5a7050b1f9e8a9870b95513060e72ac4a0`, 4 threads/100 connections, 3 s warm-up + 10 s measurement, restart each variant; no CPU isolation/affinity. Plaintext, JSON, 1 KiB echo; separate plaintext and 64 KiB binary echo equality controls pass. Normal runtime GC; no allocation profiler on HTTP. Latency is closed-loop, not an overload SLO. Local pairs 1–3 accepted; pair 0 excluded for overlapping functional tests, raw retained. Hosted order alternates across 3 pairs. Environments are **NON-COMPARABLE** with one another or previous weekly runners.
+## Current capabilities and open contracts
 
-| Environment / endpoint | Baseline / candidate median req/s | CV % baseline / candidate | Median p99 ms baseline / candidate | Median p99.9 ms baseline / candidate |
-|---|---:|---:|---:|---:|
-| Local `/` | 92233.29 / 67878.95 | 10.62 / 15.27 | 20.630 / 44.877 | 67.621 / 72.393 |
-| Local `/json` | 82320.11 / 47722.39 | 6.24 / 33.01 | 27.983 / 59.620 | 74.615 / 89.042 |
-| Local `/echo` | 110047.62 / 73738.46 | 9.80 / 33.57 | 26.798 / 97.850 | 68.588 / 190.189 |
-| Hosted `/` | 91336.09 / 92082.73 | 22.50 / 28.97 | 6.846 / 8.120 | 11.518 / 13.663 |
-| Hosted `/json` | 87461.97 / 84289.79 | 22.74 / 26.05 | 6.872 / 6.383 | 11.309 / 10.826 |
-| Hosted `/echo` | 114827.74 / 111308.94 | 15.72 / 24.77 | 5.272 / 5.478 | 8.302 / 7.871 |
-
-**MEASURED, INDICATIVE:** accepted local samples total 14,084,738 requests, no reported socket/status errors. Excluded pair 0 has two read errors. Three reverse-order plaintext controls still vary: candidate/base 39387/82026, 50882/85382, 90858/65967 req/s. Hosted echo has one baseline read error. These are neither evidence of timing equivalence nor proof the guard causes the slowdown. No regression percentage or improvement is asserted. Raw p50/p95, individual samples and errors are retained.
-
-Components: three alternating processes per variant; 10,000 warm-up / 1,000,000 timing iterations; no I/O. Median ns/op baseline→candidate: static router 47.21→45.05, parameter router 91.12→90.54, Context 12.00→12.82, builder 27.22→27.12, response lifecycle 518.04→456.64, routed-no-I/O 550.21→521.08. **INDICATIVE:** these do not execute admission and cannot clear its end-to-end gate.
-
-Allocation profiler: 10,000 warm-up / 100,000 measured iterations, 3 processes per variant, GC.collect before measurement and GC disabled during it. All six outputs agree: parser core, keep-alive flag, raw accessors, static/inline-parameter router and preallocated builder **0 D-GC B/op**; convenience method()+path() **32**; response lifecycle and routed-no-I/O **384**. **MEASURED**, restricted scope only. Setup/warm-up/network/logging/exceptions/native allocation/pool misses excluded; zero collections with GC disabled does not prove production pause freedom. LDC is AOT; no JIT claim, no cross-compiler guarantee.
-
-## Actual capabilities and remaining contract gaps
-
-| Area / owner | Current evidence | Closure requirement / unknown |
+| Area / owner | Established | Remaining gap |
 |---|---|---|
-| Endpoint/API/DX | **OBSERVED:** App + ref Context, runtime router; no automatic domain-typed binding | Preserve the working common path; do not add fictional APIs to match aspirations |
-| B1 output capacity / Aurora | **MEASURED:** bounded writer integrated, fresh release check passes | Not a proof of every aliasing/framing contract |
-| B2 request lifetime / Wire | **MEASURED:** fresh two-live-request alias reproduction at selected SHA | Owner-level independent leases, cleanup/failure/native cost and selected consumer pin |
-| B3 response boundary / Aurora | **OBSERVED:** writer still forwards status/type/body rather than all headers; previous socket failure retained | Header/framing/injection/duplicate/HEAD/204/304/error contracts at socket |
-| B4 admission / Aurora | **MEASURED:** default fails, isolated candidate passes functionality | Resolve candidate timing uncertainty; integrate only with an explicit technical decision |
-| B5 middleware/router / Aurora | **OBSERVED:** Router.use stored but not dispatched; misses bypass global pipeline | Explicit policy/order/miss/subrouter behavior; no new hook family by default |
-| B6 lifecycle / Aurora | **MEASURED:** normal logger teardown repaired and repeated process checks pass; **OBSERVED:** hijack outer cleanup, polling and weak startup-failure propagation remain | Cancellation/drain/start failure and abrupt/concurrent logger shutdown remain unvalidated |
-| B7 metrics / Aurora | **OBSERVED:** Server writes and WorkerState getter ownership differ; historical live zero count | One accounting owner; request/error/413/431/timeout live assertions |
-| B8 input/errors / Aurora + FastjsonD boundary | **OBSERVED:** silent field failures, separate mapper policies, downstream errors caught as 400 | Explicit input/domain/infrastructure error contract and migration |
-| B9 low-level handler / Aurora | **OBSERVED:** ResponseBuffer passed by value | Output-loss consequence remains **INFERRED** pending socket reproduction |
-| B10 tooling/portability | **OBSERVED:** legacy paths/dormant tools; ordinary CI covers LDC/Linux | Clean install, alternative compiler/OS, stress/realworld/Autobahn are **UNVERIFIED** |
+| Endpoint/API/DX | **OBSERVED:** App + ref Context, runtime routing, existing common entry | No automatic domain-typed binding; do not invent a feature roadmap |
+| B1 output capacity / Aurora | **MEASURED:** integrated bounded writer; release checks pass again | Not proof of all aliasing/framing semantics |
+| B2 request lifetime / Wire | **MEASURED, 11 October historical:** two live wrappers alias at unchanged selected SHA; **OBSERVED** current parser pool still has one thread-local parser without busy fallback | Independent owner-level leases, native cleanup/failure/cost and consumer pin |
+| B3 response boundary / Aurora | **OBSERVED:** status/type/body forwarding can lose headers; historical socket failure | Headers/framing/injection/HEAD/204/304/error contracts at socket |
+| B4 admission / Aurora | **MEASURED:** default red, new logger-fixed candidate green | Cost acceptance unresolved; not integrated |
+| B5 middleware/router / Aurora | **OBSERVED:** Router.use stored but not dispatched; misses bypass global pipeline | Explicit policy/order/miss/subrouter semantics |
+| B6 lifecycle / Aurora | **MEASURED:** integrated logger normal-exit repair passes fresh 400 checks locally and 400 CI | **OBSERVED:** hijack outer cleanup, polling and weak startup-failure propagation; cancellation/drain/abrupt/concurrent teardown unknown |
+| B7 metrics / Aurora | **OBSERVED:** Server writes vs WorkerState getter ownership mismatch; historical live zero count | One accounting owner and fresh request/error/413/431/timeout assertions |
+| B8 input/errors / Aurora + FastjsonD | **OBSERVED:** silent field failure/separate mapper policy/downstream errors caught as 400 | Explicit input/domain/infrastructure error semantics and migration |
+| B9 low-level handler / Aurora | **OBSERVED:** ResponseBuffer passed by value | Output loss is **INFERRED**, needs socket reproduction |
+| B10 tooling/portability | **MEASURED:** canonical worker/limit flags and response control; **OBSERVED:** legacy paths/dormant tools | Empty-cache package, other compiler/OS, stress/realworld/Autobahn remain UNVERIFIED |
 
-`queueRequest` remains a TODO/503 fallback; the gzip branch's zlib framing finding remains open. No complete security audit, sustained overload, trace propagation or enabled/disabled observability cost has been established. Source inspection is not a fresh end-to-end test of these defects.
+`queueRequest` remains TODO/503 fallback; prior gzip/zlib framing finding remains open. Parser/router unit tests pass within the 47-module suite; no new fuzzing, complete RFC/security audit, router mutation/concurrency proof, trace propagation, enabled/disabled observability cost or soak/overload certification.
+
+Allocation: three local candidate profiles and fresh CI agree with pinned baseline artifact: parser core, keep-alive, raw accessors, static/inline-parameter router and preallocated builder 0 D-GC B/op; method()+path() 32; response lifecycle and routed request without I/O 384. **MEASURED**, 10,000 warm-up/100,000 measurement operations, pre-measure GC.collect then GC disabled. Setup/warm-up/network/logging/exceptions/native allocation/pool misses/overflow excluded; zero collection here is forced, not production pause freedom. LDC AOT, no JIT/cross-compiler claim. Three 1,000,000-iteration microbenchmark processes after 10,000 warm-up were collected; no compatible timing baseline or admission execution in those paths, so they cannot clear B4.
 
 ## Multidimensional scorecard
 
-| Dimension | Established | Still unknown / deficient |
+| Dimension | Proven / observed | Unknown / deficient |
 |---|---|---|
-| Correctness | **MEASURED:** 47 modules, B1 pass, B4 candidate red/green, logger teardown repair | B2/B3/B4 default; other dispatch paths |
-| Protocol | **MEASURED:** 5 fragmentation/pipeline/retirement/deadline probes | **UNVERIFIED:** exhaustive framing/encoding/upgrade/fuzz compliance |
-| Performance / tail | **MEASURED:** two-environment paired data, explicit errors and dispersion | Causal adverse signal; controlled-arrival p99.9 and useful-load SLOs |
-| CPU efficiency | **MEASURED:** invalid local CPU counter calibration | CPU/request, cycles/instructions, syscall/lock attribution |
-| Memory efficiency | **OBSERVED:** borrowed state/pools; B2 lifetime failure | Native allocation, RSS/connection, retention/exhaustion |
-| Allocation behavior | **MEASURED:** unchanged selected 0/32/384 D-GC B/op | Network, middleware/error, native total; no server-wide zero allocation |
-| Scalability | **MEASURED:** one/two-worker contract tests, four/nine-worker load | Scaling efficiency, fairness, contention |
-| Resilience | **MEASURED:** framing/write timeout; B4 candidate cleanup; normal logger module teardown | Default admission, cancellation, drain/startup failure, soak |
-| Security | **MEASURED:** B1 bounds guard regression passes | **UNVERIFIED:** comprehensive audit; lost security headers remain |
-| Observability | **MEASURED:** logger normal shutdown fixed; **OBSERVED:** metric ownership mismatch | Accurate events, useful diagnostics, off/on overhead |
-| API quality / DX | **OBSERVED:** small common entry; candidate limit semantics explicit | Correct public contracts before more convenience APIs; user journey measurements |
-| Documentation | **OBSERVED:** canonical owner map retained, links checked | Candidate and default must remain distinct; historical reports not normative |
-| Packaging / release | **OBSERVED:** no Aurora GitHub release; exact selections | Registry packaging/empty-cache delivery and release policy validation |
-| Compatibility | **MEASURED:** LDC 1.42/Linux x86-64 | DMD/other platforms/version minima **UNVERIFIED** |
-| Ecosystem readiness | **OBSERVED:** first-party ownership and selected revisions explicit | Integrated lease contract, consumer compatibility, real adoption |
-| Debt / accidental complexity | **OBSERVED:** duplicated representation/accounting/input state | Eliminate causes, not add compensating layers |
+| Correctness | **MEASURED:** 47 modules, capacity, logger, candidate admission red/green | B2/B3/B4 default and other dispatch boundaries |
+| Protocol | **MEASURED:** 5 socket framing/retirement/deadline probes | Exhaustive encoding/framing/upgrade/fuzz **UNVERIFIED** |
+| Performance / tail | **MEASURED:** 117 primary process comparisons, A/A controls, p50/p95/p99/p99.9 | No timing equivalence; adverse CPU/RSS signals, open-loop saturation unknown |
+| CPU efficiency | **MEASURED:** calibrated whole-process wait4 CPU/request | Steady-state attribution, cycles/instructions/syscalls/locks **UNVERIFIED** |
+| Memory efficiency | **MEASURED:** process peak RSS; **OBSERVED:** borrowing/pools | Native allocations, retention, memory/connection; B2 |
+| Allocations | **MEASURED:** restricted 0/32/384 D-GC B/op | No end-to-end zero-allocation claim |
+| Scaling | **MEASURED:** one/two-worker contract/cost runs | Configurations do not establish scaling efficiency/fairness |
+| Resilience | **MEASURED:** write timeout, logger exit, candidate permit cleanup | Default admission, cancellation/drain/start failure/soak |
+| Security | **MEASURED:** release-active bounds guard | Lost headers, complete audit and exhaustion unknown |
+| Observability | **MEASURED:** logger exit; calibrated CPU evidence | Metric ownership inaccurate; off/on cost and trace contracts unknown |
+| API / DX | **OBSERVED:** common entry retained; no new runtime concepts | Correct existing contracts before convenience; no user-journey metric |
+| Documentation | **OBSERVED:** one current owner, candidate/default separated | Historical evidence must not become normative instructions |
+| Packaging / release | **OBSERVED:** exact selected pins, no Aurora release | Clean install and version/support policy unknown |
+| Compatibility / ecosystem | **MEASURED:** LDC 1.42/Linux x86-64 consumer | DMD/other platforms and independent adoption unknown |
+| Debt / complexity | **OBSERVED:** measurement reuses OS/D/wrk, no new runtime mechanism | Duplicate representation/accounting/input ownership remains |
 
 ## Decision and next discriminator
 
-The North Star does not select a rewrite or a new subsystem. It increases the value of predictable existing contracts: the current experiment fixes ownership using existing mechanisms. B4 outranked the previous suggested B2 experiment because a bounded, independently testable correction could improve overload correctness, API truth and DX together. Fresh evidence now changes the next decision again.
+The North Star still selects reliable existing contracts over a rewrite, new subsystem or cosmetic API. This cycle removed measurement blindness and separated a proven permit-lifetime correction from an unproven performance claim. It does not establish the current runtime as the best design point.
 
-**Dominant integration uncertainty after the logger repair:** whether the admission candidate has a material disabled-path cost or whether run/host variability dominates. A second environment reduced neither dispersion nor causal uncertainty sufficiently to claim equivalence. Local /proc accounting is invalid and ptrace is denied; do not fabricate profiling or bypass restrictions.
+**Dominant integration uncertainty:** why identical-binary process CPU/RSS varies, and whether the candidate adds a repeatable cost after accounting for it. One-worker results weaken a simple universal guard-overhead hypothesis; they do not prove a multi-worker scheduler cause. GC diagnostics are discriminating evidence, not a reason to change collector policy speculatively.
 
-The late process failure was investigated and repaired before returning to this question. **Next highest-information action (revisable):** first reconcile the admission branch with the logger-fixed default and rerun its contract gates (the old candidate does not contain the logger fix); then, on a runner with valid process CPU accounting, interleave identical-binary A/A controls with pinned A/B, fix worker/client CPU budget and randomize/counterbalance order. Use the public comparison harness; record CPU/request and throughput/tails/errors, verify counter calibration, and preserve exact-byte controls. Falsifier: repeatable candidate-specific degradation larger than A/A dispersion, with attributable CPU or scheduling cost. If confirmed, simplify the scope/cleanup code generation without restoring early release; if falsified with adequate precision, integrate the safety fix. No preset acceptable percentage is retrofitted to these samples. B2 and B3 remain competing high-value correctness repairs once this gate can be decided. No user permission is outstanding.
+**Next highest-value experiment (revisable):** profile one pinned baseline/candidate/control at the worker/runtime/GC boundary with valid counters and longer stable windows, decomposing idle, useful request CPU and collection/scheduler work; inspect the generated disabled/enabled admission cleanup paths. Require candidate-specific repeatability beyond A/A variation before attributing cost or accepting equivalence. Enabled-limit cost remains unmeasured because the disabled-path gate did not clear. B2 lease ownership and B3 header/framing remain competing correctness interventions, not tasks automatically queued behind B4. No permission is outstanding; no new API, custom scheduler or GC tuning is justified by this evidence.
 
-## Historical versus normative state
-
-[Prior canonical state](https://github.com/federikowsky/Aurora/blob/d5d9be42c1d802b8aa9b26cda9f46dbec646e5cd/docs/ENGINEERING_STATUS.md) retains the document audit, old raw artifact references and superseded decisions. Deleted plan/ROADMAP material remains in Git history. No parallel history tree, new roadmap, subsystem catalog or competing scorecard is introduced. External North Star/state files are entry points only. Reacquire source, rerun contested evidence and update this owner when findings change.
+[Prior canonical state](https://github.com/federikowsky/Aurora/blob/87f9ee3f931329f49ff8f2e560613697f540d327/docs/ENGINEERING_STATUS.md) retains earlier experiments, raw archives and superseded decisions. History is not a second current scorecard; external files are entry points only. Reacquire refs and contested evidence before the next decision.
