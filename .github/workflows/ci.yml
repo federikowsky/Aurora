@@ -110,6 +110,12 @@ jobs:
             --compiler=ldc2 --build=release 2>&1 \
             | tee artifacts/ci/microbench.log
 
+      - name: Check canonical benchmark configuration
+        run: |
+          set -o pipefail
+          dub build benchmarks/server.d --single --compiler=ldc2 --build=release 2>&1 | tee artifacts/ci/benchmark-build.log
+          python3 tests/integration/benchmark_config_probe.py ./benchmarks/aurora_benchmark 2>&1 | tee artifacts/ci/benchmark-config.log
+
       - name: Collect D-GC allocation evidence
         run: |
           set -o pipefail

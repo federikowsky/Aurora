@@ -34,8 +34,12 @@ import aurora;
 import std.stdio : writeln, writefln;
 import core.time : Duration, msecs;
 
-void main()
+void main(string[] args)
 {
+    import std.getopt : getopt;
+    uint workers = 0;
+    uint inFlight = 0;
+    getopt(args, "workers", &workers, "in-flight", &inFlight);
     writeln("╔════════════════════════════════════════════════════════════╗");
     writeln("║           Aurora Benchmark Server v1.0.0                   ║");
     writeln("╚════════════════════════════════════════════════════════════╝");
@@ -44,9 +48,9 @@ void main()
     // Minimal config for maximum performance
     auto config = ServerConfig.defaults();
     config.port = 8080;  // Use 9000 to avoid conflicts
-    config.numWorkers = 0;  // Auto-detect CPU cores
+    config.numWorkers = workers;  // 0 = auto-detect; match the assigned CPU budget
     config.maxConnections = 0;  // 0 = disable backpressure (no overhead)
-    config.maxInFlightRequests = 0;  // 0 = disable in-flight limit
+    config.maxInFlightRequests = inFlight;  // 0 = disable in-flight limit
     
     auto app = new App(config);
     
@@ -81,6 +85,7 @@ void main()
     writeln();
     writefln("Workers: %d", config.effectiveWorkers);
     writefln("Max connections: %d", config.maxConnections);
+    writefln("Max in-flight requests: %d", config.maxInFlightRequests);
     writeln();
     writeln("Starting server on http://localhost:8080");
     writeln("Use Ctrl+C to stop");
