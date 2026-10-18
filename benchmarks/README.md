@@ -31,7 +31,7 @@ Repeated clients against one server are not independent server forks. Restart/wa
 Before claiming a change: freeze command/workload/falsifier; record SHA and patch/dirty state, host/virtualization, OS/CPU/memory, compiler/runtime/build flags, duration/iterations, threads/connections, GC/profiler and raw output; repeat with dispersion; check held-out workloads and correctness. Use CPU/native allocation/RSS/scaling profiles only when their accounting is valid. Label different environments NON-COMPARABLE; retain unfavorable outcomes and failed measurements.
 
 The old README's numbers are retained in [Git history](https://github.com/federikowsky/Aurora/blob/3416660672229179b947e54bf4bfb650309aa38e/benchmarks/README.md). They are not the current baseline. No benchmark exception permits incorrect framing, memory access or disabled security checks in the product.
-# Explicit resource controls
+## Explicit resource controls
 
 The canonical server accepts `--workers=N` and `--in-flight=N`. Defaults remain
 auto-detected workers and disabled in-flight admission. Use a worker count matching
@@ -39,3 +39,19 @@ the server CPU budget; these are ordinary `ServerConfig` settings, not alternati
 benchmark-only dispatch paths. Report them alongside affinity/client resources.
 `tests/integration/benchmark_config_probe.py` checks real startup, selected values,
 response bytes and process exit; ordinary CI runs it on the release server.
+
+## Admission A/A–A/B experiment (Linux)
+
+`compare_admission.py BASE_BINARY CANDIDATE_BINARY WRK OUTPUT` uses two labels for
+the identical baseline executable and one for the candidate, rotating order over
+five blocks and three canonical routes. Defaults: disjoint server CPUs 0/1 and
+client CPUs 2/3, two workers, two client threads, 100 connections, 2 s warm-up and
+5 s measurement; `--limit=1000` exercises enabled admission. Pass explicit CPU
+lists when these are unavailable. Both servers must support the resource options.
+
+The script uses Linux affinity and `wait4`, not new framework instrumentation.
+Calibrate CPU accounting first. Server CPU/request includes initialization, exact
+byte controls, warm-up and shutdown; peak RSS includes all server memory. Neither
+is a pure steady-state allocation metric. Errors are retained, not accepted as
+useful throughput. Closed-loop latency is not an overload SLO. Compare only the
+recorded compatible configurations, retaining A/A dispersion and adverse results.
