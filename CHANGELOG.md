@@ -2,6 +2,8 @@
 
 ## Unreleased — 11 October 2026
 
+- Select Wire `6c5965eb71dbe81a9abc74832bf7a8020835ae5b`, whose exclusive parser leases keep overlapping live `HTTPRequest` values independent while preserving sequential parser reuse. Add a consumer-level lifetime regression and document the remaining borrowed input-buffer contract.
+
 - Own the process-wide logger mutex and normal shutdown at module scope; join/drain the daemon before runtime finalization. Add debug/release process-exit and concurrent-first-access checks.
 
 - Return immediately when `buildResponseInto` capacity is exhausted to prevent integer-wrap writes before an undersized output slice. Document partial-output semantics; test capacity, framing and ownership in debug/release.

@@ -13,6 +13,6 @@
 		"unit-threaded": "2.1.9",
 		"vibe-container": "1.7.1",
 		"vibe-core": "2.8.6",
-		"wire": {"version":"82b6a5dfd606ebe2ac15c83d9430abdb58aec09b","repository":"git+https://github.com/federikowsky/Wire.git"}
+		"wire": {"version":"6c5965eb71dbe81a9abc74832bf7a8020835ae5b","repository":"git+https://github.com/federikowsky/Wire.git"}
 	}
 }

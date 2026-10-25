@@ -20,7 +20,7 @@ app.get("/users/:id", (ref Context ctx) {
 
 [Context](../source/aurora/web/context.d) gives access to `request`, `response`, `params` and request-local storage. Query/body access belongs to [HTTPRequest](../source/aurora/http/package.d), not fictional `ctx.query`/`ctx.body` getters. Raw accessor views are borrowed; convenience accessors can copy/allocate. Neither a `Context` copy nor a raw view extends the backing buffer's lifetime. Make an explicitly owned copy when data must outlive dispatch.
 
-Independent live request wrappers are unsafe with the default Wire revision; a tested candidate exists but is not automatically selected by the default manifest. See the state register.
+Independent live request wrappers retain separate parser state with the selected Wire revision. Each wrapper still borrows its own input bytes, so those buffers must remain alive and unchanged until their wrappers are released. Sequential parses reuse an idle parser; cold or overlapping wrappers can allocate parser state on the native heap.
 
 ## Producing output
 
