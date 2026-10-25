@@ -6,9 +6,9 @@
 
 GitHub metadata was reacquired on 25 October; the actual default branch of every first-party repository is `main`.
 
-| Repository | Current default / selected revision | Boundary |
+| Repository | Implementation / selected revision | Boundary |
 |---|---|---|
-| Aurora | `15ccc3b1b9b17ec2d225b010045b63dab4e2342b` | [PR #8](https://github.com/federikowsky/Aurora/pull/8) selects the integrated Wire ownership repair in both DUB files and adds a consumer regression |
+| Aurora | code boundary `15ccc3b1b9b17ec2d225b010045b63dab4e2342b`; this scorecard is a later documentation-only overlay | [PR #8](https://github.com/federikowsky/Aurora/pull/8) selects the integrated Wire ownership repair in both DUB files and adds a consumer regression |
 | Wire | `6c5965eb71dbe81a9abc74832bf7a8020835ae5b` | [PR #3](https://github.com/federikowsky/Wire/pull/3) gives every live wrapper an exclusive parser lease; same SHA selected by Aurora |
 | FastjsonD | `23a51d692103a0b77cba153afa2994df0c14f4d3` | Same exact SHA selected; no change this cycle |
 | Aurora-WebSocket | `edfbbc6d4e1a7f713a96faa13bebfbb44a51c9d2` | Aurora selects package `1.0.1`, not automatically repository HEAD; no change this cycle |
