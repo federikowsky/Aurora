@@ -1,6 +1,6 @@
 # Current architecture and ownership
 
-Descriptive, not a future specification. Runtime inspected at Aurora `3416660672229179b947e54bf4bfb650309aa38e`, documentation baseline `3ef10f35acb701f3c7ee180df5b56482ab2a07b5`, and bounded-writer fix `414d2f83420bdac605cadc5c98338ce61fd6c6f2` on 4 October 2026. The older combined candidate remains separate. Candidate differences are explicit in [ENGINEERING_STATUS](ENGINEERING_STATUS.md). Code at the checkout revision wins over this map. Principles belong to [NORTH_STAR](NORTH_STAR.md); public behavior and caveats to [API](API.md).
+Descriptive, not a future specification. Reconciled on 25 October 2026 after selecting integrated Wire parser leases at `6c5965eb71dbe81a9abc74832bf7a8020835ae5b`. Exact Aurora revisions, candidates and evidence boundaries are in [ENGINEERING_STATUS](ENGINEERING_STATUS.md). Code and selected dependencies at the checkout revision win over this map. Principles belong to [NORTH_STAR](NORTH_STAR.md); public behavior and caveats to [API](API.md).
 
 ## Request journey
 
@@ -18,7 +18,7 @@ Descriptive, not a future specification. Runtime inspected at Aurora `3416660672
 |---|---|---|
 | Aurora App/Router | Registration, selection, parameters, global middleware orchestration | Runtime trie child search; local router middleware is stored but not dispatched |
 | Aurora Server/WorkerPool | Connection lifecycle, message framing, dispatch, deadlines, admission, worker coordination | Duplicated metrics/state; admission scope and shutdown need validation |
-| Wire | Native HTTP field parser and D request wrapper | Input views are borrowed; published candidate changes native parser lease lifetime |
+| Wire | Native HTTP field parser and D request wrapper | Live wrappers own independent parsers; field views still borrow the caller's input buffer |
 | Aurora HTTP/Context | Request conveniences, response representation, per-request application access | Convenience copies/allocations; response model differs from actual output path |
 | FastjsonD | Native JSON document/value parsing used by Aurora's schema mapper | Aurora retains its own template serialization/mapping; separate std.json validation mapper also exists |
 | Aurora schema/middleware | UDA validation, JSON mapping, middleware validation | Distinct error/default semantics, silent conversion failures and duplicate exception names |
@@ -33,7 +33,7 @@ No component is declared optimal merely because it exists. No new subsystem spli
 
 The input buffer is retained through synchronous dispatch; raw accessor and route parameter views depend on that storage. A copied `Context` is not an owned request snapshot. Do not retain borrowed pointers/views into asynchronous work after dispatch. Buffer pooling/reuse reduces some repeated allocation; it does not establish zero native allocation or bounded RSS for every workload.
 
-Wire's default parser lease can be reused while an earlier request wrapper is live. The candidate implements independent leases. See the exact revisions and test evidence before inferring which behavior a checkout has.
+The selected Wire revision gives each live request wrapper an exclusive parser lease. Each thread caches at most one idle parser for sequential reuse; cold or overlapping requests may allocate parser state on the native heap. This prevents a later parse from overwriting an earlier live request, but does not own the input bytes: every `StringView` still borrows the caller's buffer.
 
 `HTTPResponse` contains an associative header map and body. Runtime output construction makes another representation/copy. The preallocated builder now keeps capacity exhaustion sticky and returns zero without writing outside its output slice. Partial output on failure must be discarded. Duplicate header names, framing authority and complete response output require one tested contract before redesigning representation for speed.
 

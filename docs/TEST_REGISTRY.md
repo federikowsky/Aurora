@@ -33,7 +33,8 @@ Unit selection excludes `tests/stress/*`, `tests/realworld/*` and the standalone
 - [HTTP unit tests](../tests/unit/http) and [router tests](../tests/unit/web) cover selected malformed inputs, boundaries, precedence and backtracking. They do not establish full RFC compliance, fuzz coverage or concurrent mutation safety.
 - [Stress tests](../tests/stress) and [realworld fixtures](../tests/realworld/README.md) are experimental and outside ordinary CI. Inspect their dependencies, server assumptions and resource costs before execution.
 - [Benchmarks](../benchmarks/README.md) separate component cost, allocations and network measurements. They are not correctness or readiness substitutes.
-- [Response capacity regressions](../tests/unit/http/response_buffer_test.d) are selected by ordinary unittest and also compiled/run standalone in release by CI. They use `enforce`, so checks survive `-release`. The overlapping-request lifetime regression remains candidate-only; the default suite cannot claim that fix.
+- [Response capacity regressions](../tests/unit/http/response_buffer_test.d) are selected by ordinary unittest and also compiled/run standalone in release by CI. They use `enforce`, so checks survive `-release`.
+- [HTTP request tests](../tests/unit/http/http_test.d) include the consumer boundary for two simultaneously live requests. Wire owns the underlying parser-lease tests, including non-LIFO release, moves, thread handoff, incomplete input and parse-error isolation.
 
 For a new behavior fix, add the smallest meaningful executable contract test at the failing boundary, run it red then green, exercise relevant exit/error/reuse paths and link raw results. Test selection must follow risk and information gain, not historical suite size. Never report a timed-out, skipped or assertion-disabled run as a pass.
 

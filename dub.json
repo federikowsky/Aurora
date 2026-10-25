@@ -15,7 +15,7 @@
         "aurora-websocket": "~>1.0.0",
         "wire": {
             "repository": "git+https://github.com/federikowsky/Wire.git",
-            "version": "82b6a5dfd606ebe2ac15c83d9430abdb58aec09b"
+            "version": "6c5965eb71dbe81a9abc74832bf7a8020835ae5b"
         },
         "fastjsond": {
             "repository": "git+https://github.com/federikowsky/Fastjsond.git",

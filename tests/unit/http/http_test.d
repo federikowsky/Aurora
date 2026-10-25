@@ -576,9 +576,28 @@ unittest
         req2.method.shouldEqual("GET");
     }
 
-    // Wire uses zero-copy - it returns slices into the original buffer
-    // This test verifies we can parse without allocation overhead
-    // Note: Only ONE active parse result at a time (thread-local parser pool)
+    // Wire uses zero-copy views into the original buffer. Sequential parsing
+    // reuses an idle parser without allocating a new parser.
+}
+
+@("overlapping requests retain independent parser state")
+unittest
+{
+    auto firstBytes = cast(ubyte[])(
+        "POST /first HTTP/1.1\r\nHost: first\r\nContent-Length: 3\r\n\r\nONE"
+    ).dup;
+    auto secondBytes = cast(ubyte[])(
+        "GET /second HTTP/1.1\r\nHost: second\r\n\r\n"
+    ).dup;
+
+    auto first = HTTPRequest.parse(firstBytes);
+    auto second = HTTPRequest.parse(secondBytes);
+
+    first.methodRaw().shouldEqual("POST");
+    first.pathRaw().shouldEqual("/first");
+    first.body().shouldEqual("ONE");
+    second.methodRaw().shouldEqual("GET");
+    second.pathRaw().shouldEqual("/second");
 }
 
 // Test 30: Random bytes fuzz test
