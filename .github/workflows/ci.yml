@@ -161,6 +161,14 @@ jobs:
             ./tests/integration/aurora_protocol_probe_server 2>&1 \
             | tee artifacts/ci/http-protocol-probe.log
 
+      - name: Check WebSocket upgrade in debug and release
+        run: |
+          set -eo pipefail
+          for build in debug release; do
+            dub build tests/integration/websocket_probe_server.d --single --compiler=ldc2 --build="$build" 2>&1 | tee "artifacts/ci/websocket-$build-build.log"
+            python3 tests/integration/http_websocket_probe.py ./tests/integration/aurora_websocket_probe_server 2>&1 | tee "artifacts/ci/websocket-$build.log"
+          done
+
       - name: Collect release microbenchmark evidence
         # Keep admission checks separate from throughput evidence.
         run: |

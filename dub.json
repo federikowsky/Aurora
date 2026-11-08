@@ -12,7 +12,10 @@
         "eventcore": "~>0.9.0",
         "mir-algorithm": "~>3.22.0",
         "unit-threaded": "~>2.1.9",
-        "aurora-websocket": "~>1.0.0",
+        "aurora-websocket": {
+            "repository": "git+https://github.com/federikowsky/Aurora-WebSocket.git",
+            "version": "4bfb2c8f33194edcd6bca4217857174fa82d7bdf"
+        },
         "wire": {
             "repository": "git+https://github.com/federikowsky/Wire.git",
             "version": "6c5965eb71dbe81a9abc74832bf7a8020835ae5b"
@@ -63,6 +66,7 @@
             "excludedSourceFiles": [
                 "tests/integration/protocol_probe_server.d",
                 "tests/integration/admission_probe_server.d",
+                "tests/integration/websocket_probe_server.d",
                 "tests/fixtures/logger_lifecycle.d",
                 "tests/realworld/*",
                 "tests/stress/*"
@@ -92,6 +96,7 @@
             "excludedSourceFiles": [
                 "tests/integration/protocol_probe_server.d",
                 "tests/integration/admission_probe_server.d",
+                "tests/integration/websocket_probe_server.d",
                 "tests/fixtures/logger_lifecycle.d",
                 "tests/realworld/*",
                 "tests/stress/*"

@@ -1,7 +1,7 @@
 {
 	"fileVersion": 1,
 	"versions": {
-		"aurora-websocket": "1.0.1",
+		"aurora-websocket": {"version":"4bfb2c8f33194edcd6bca4217857174fa82d7bdf","repository":"git+https://github.com/federikowsky/Aurora-WebSocket.git"},
 		"during": "0.3.0",
 		"eventcore": "0.9.39",
 		"fastjsond": {"version":"23a51d692103a0b77cba153afa2994df0c14f4d3","repository":"git+https://github.com/federikowsky/Fastjsond.git"},

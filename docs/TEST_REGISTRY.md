@@ -32,6 +32,8 @@ Unit selection excludes `tests/stress/*`, `tests/realworld/*` and the standalone
 
 - Admission: build `tests/integration/admission_probe_server.d` with the same single-file DUB options as the protocol fixture, then run `python3 tests/integration/http_admission_probe.py ./tests/integration/aurora_admission_probe_server`. CI runs debug/release. Twelve scenarios per build cover one/two workers, limits 0/1/2, bursts, exceptions, write-timeout cleanup, pipelining and keep-alive. Two-worker mode does not force socket placement on separate workers.
 
+- WebSocket: build `tests/integration/websocket_probe_server.d` with `dub build tests/integration/websocket_probe_server.d --single --compiler=ldc2 --build=release` (or `--build=debug`), then run `python3 tests/integration/http_websocket_probe.py ./tests/integration/aurora_websocket_probe_server`. CI exercises both builds over a real socket: valid 101, masked echo and close, plus application HTTP 400 for non-GET, HTTP/1.0, malformed Base64 and the wrong decoded key length. Deferred ownership and exhaustive RFC 6455 coverage are outside this gate.
+
 - [HTTP unit tests](../tests/unit/http) and [router tests](../tests/unit/web) cover selected malformed inputs, boundaries, precedence and backtracking. They do not establish full RFC compliance, fuzz coverage or concurrent mutation safety.
 - [Stress tests](../tests/stress) and [realworld fixtures](../tests/realworld/README.md) are experimental and outside ordinary CI. Inspect their dependencies, server assumptions and resource costs before execution.
 - [Benchmarks](../benchmarks/README.md) separate component cost, allocations and network measurements. They are not correctness or readiness substitutes.
