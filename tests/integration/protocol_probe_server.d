@@ -40,6 +40,35 @@ void main()
         ctx.send(ctx.request.body());
     });
 
+    app.get("/response-headers", (ref Context ctx) {
+        ctx.status(201)
+            .header("Content-Type", "text/plain")
+            .header("X-Aurora-Probe", "preserved");
+        ctx.send("created");
+    });
+
+    app.route("HEAD", "/response-head", (ref Context ctx) {
+        ctx.header("Content-Type", "text/plain")
+            .header("X-Aurora-Probe", "head");
+        ctx.send("hidden");
+    });
+
+    app.get("/response-no-content", (ref Context ctx) {
+        ctx.status(204).header("X-Aurora-Probe", "no-content");
+        ctx.send("must-not-be-sent");
+    });
+
+    app.get("/response-not-modified", (ref Context ctx) {
+        ctx.status(304)
+            .header("ETag", "\"aurora-probe\"")
+            .header("X-Aurora-Probe", "not-modified");
+        ctx.send("must-not-be-sent");
+    });
+
+    app.route("HEAD", "/response-error", (ref Context ctx) {
+        throw new Exception("response probe failure");
+    });
+
     auto largeBodyStorage = new char[32 * 1024 * 1024];
     largeBodyStorage[] = 'x';
     string largeBody = cast(string)largeBodyStorage;

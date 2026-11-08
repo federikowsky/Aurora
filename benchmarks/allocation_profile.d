@@ -110,6 +110,9 @@ void main()
     });
 
     ubyte[4096] responseBuffer;
+    auto bufferedResponse = HTTPResponse(200, "OK");
+    bufferedResponse.setHeader("Content-Type", "text/plain");
+    bufferedResponse.setBody("Hello, World!");
 
     void parseCore()
     {
@@ -166,6 +169,11 @@ void main()
         sink += response.getBody().length;
     }
 
+    void responseObjectBuilder()
+    {
+        sink += bufferedResponse.buildInto(responseBuffer[], true, false);
+    }
+
     void routedRequestNoIo()
     {
         auto matched = router.match(
@@ -180,12 +188,10 @@ void main()
         if (matched.handler !is null)
             matched.handler(context);
 
-        sink += buildResponseInto(
+        sink += response.buildInto(
             responseBuffer[],
-            response.status,
-            response.getContentType(),
-            response.getBody(),
-            parsedRequest.shouldKeepAlive()
+            parsedRequest.shouldKeepAlive(),
+            false
         );
     }
 
@@ -201,6 +207,9 @@ void main()
     emitAndRequireZero(measure!parameterRoute("router-inline-param"));
     emitAndRequireZero(
         measure!responseBuilder("preallocated-response-builder")
+    );
+    emitAndRequireZero(
+        measure!responseObjectBuilder("response-object-builder")
     );
     emit(measure!responseLifecycle("response-object-lifecycle"));
     emit(measure!routedRequestNoIo("routed-request-no-io"));

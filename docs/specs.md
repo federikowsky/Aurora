@@ -9,7 +9,7 @@ Descriptive, not a future specification. Reconciled on 25 October 2026 after sel
 3. Aurora retains a receive buffer, incrementally frames a complete HTTP message, checks framing/size boundaries and passes it to [Wire via HTTPRequest](../source/aurora/http/package.d). Residual pipelined bytes are retained. Framing and field parsing are distinct current responsibilities; duplication cost has not justified replacing either.
 4. [Router](../source/aurora/web/router.d) matches method/path and extracts parameters. `handleWithRouter` creates a per-request `Context` and `HTTPResponse`, invokes hooks and, only after a successful match, the global pipeline and handler.
 5. [Context](../source/aurora/web/context.d) exposes borrowed request/response pointers, parameters, small storage and response/upgrade helpers. Domain work remains in the handler. JSON decoding, validation and serialization are explicit calls today, not an automatic typed-input pipeline.
-6. `HTTPResponse` accumulates application output. The current runtime reconstructs the wire response from status/content type/body/keep-alive. This loses other response headers; it is an open defect, not intentional semantics.
+6. `HTTPResponse` accumulates application output and is the authoritative buffered response representation. The runtime serializes it directly, preserving application fields while deriving framing and body suppression from status, request method and connection lifecycle.
 7. The writer applies write deadlines; connection code decides keep-alive/retirement, compacts remaining input and cleans up. Hijack and request-admission lifetimes have known defects described in the state register.
 
 ## Responsibility map
@@ -19,7 +19,7 @@ Descriptive, not a future specification. Reconciled on 25 October 2026 after sel
 | Aurora App/Router | Registration, selection, parameters, global middleware orchestration | Runtime trie child search; local router middleware is stored but not dispatched |
 | Aurora Server/WorkerPool | Connection lifecycle, message framing, dispatch, deadlines, admission, worker coordination | Duplicated metrics/state; admission scope and shutdown need validation |
 | Wire | Native HTTP field parser and D request wrapper | Live wrappers own independent parsers; field views still borrow the caller's input buffer |
-| Aurora HTTP/Context | Request conveniences, response representation, per-request application access | Convenience copies/allocations; response model differs from actual output path |
+| Aurora HTTP/Context | Request conveniences, authoritative buffered response representation, per-request application access | Convenience accessors can copy/allocate; repeated response fields are not representable |
 | FastjsonD | Native JSON document/value parsing used by Aurora's schema mapper | Aurora retains its own template serialization/mapping; separate std.json validation mapper also exists |
 | Aurora schema/middleware | UDA validation, JSON mapping, middleware validation | Distinct error/default semantics, silent conversion failures and duplicate exception names |
 | Aurora-WebSocket | WebSocket protocol/types used by upgrade helpers | Aurora owns HTTP handoff; asynchronous ownership and full protocol validation remain open |
@@ -35,7 +35,7 @@ The input buffer is retained through synchronous dispatch; raw accessor and rout
 
 The selected Wire revision gives each live request wrapper an exclusive parser lease. Each thread caches at most one idle parser for sequential reuse; cold or overlapping requests may allocate parser state on the native heap. This prevents a later parse from overwriting an earlier live request, but does not own the input bytes: every `StringView` still borrows the caller's buffer.
 
-`HTTPResponse` contains an associative header map and body. Runtime output construction makes another representation/copy. The preallocated builder now keeps capacity exhaustion sticky and returns zero without writing outside its output slice. Partial output on failure must be discarded. Duplicate header names, framing authority and complete response output require one tested contract before redesigning representation for speed.
+`HTTPResponse` stores status, body and only application-supplied fields. The header map remains null for the common response until a field is actually added; `Content-Length`, `Connection` and the default `Server` field are derived during serialization instead of duplicated as mutable state. The runtime passes the response directly to its bounded serializer. Application fields survive, names replace case-insensitively, invalid field syntax is rejected, and HEAD/1xx/204/205/304 body rules are applied at this boundary. The preallocated builder is `@nogc`, keeps capacity exhaustion sticky and returns zero without writing outside its output slice. Partial output on failure must be discarded. Repeated same-name fields remain unsupported because the public map stores one value per name.
 
 `Context.hijack()` marks its local state and returns a connection wrapper, but outer cleanup still closes the connection after dispatch. Synchronous use inside a callback is not proof of escaped asynchronous ownership. Server, worker and logger lifecycle ownership must be checked at actual exit paths, not inferred from API names.
 

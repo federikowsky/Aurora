@@ -1,6 +1,11 @@
 # Change history
 
-## Unreleased — 11 October 2026
+## Unreleased — 8 November 2026
+
+- Make `HTTPResponse` the authoritative buffered response contract. Preserve application fields end to end, derive framing from final state, enforce HEAD/1xx/204/205/304 body rules and reject response-splitting field syntax.
+- Make `getHeaders()` read-only; callers mutating its map must use `setHeader` or `Context.header` so field validation cannot be bypassed.
+- Remove duplicated default/framing fields from the per-request hash map. The minimal response lifecycle and routed no-I/O profile now measure 0 D-GC B/op in their stated preallocated scope; this is not an end-to-end zero-allocation claim.
+- Extend the socket probe, unit suite and allocation/microbenchmark fixtures to exercise the response path actually used by the runtime.
 
 - Select Wire `6c5965eb71dbe81a9abc74832bf7a8020835ae5b`, whose exclusive parser leases keep overlapping live `HTTPRequest` values independent while preserving sequential parser reuse. Add a consumer-level lifetime regression and document the remaining borrowed input-buffer contract.
 

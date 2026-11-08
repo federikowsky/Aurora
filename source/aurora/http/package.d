@@ -26,7 +26,6 @@ public import aurora.http.form;
 import wire;
 import std.string : toLower;
 import std.conv : to;
-import std.array : appender;
 
 /**
  * HTTP Request - wraps Wire parser
@@ -382,6 +381,9 @@ struct HTTPRequest
  */
 struct HTTPResponse
 {
+    private enum string DEFAULT_CONTENT_TYPE = "text/html";
+    private enum string SERVER_HEADER = "Aurora/0.2";
+
     private int statusCode = 200;
     private string statusMessage = "OK";
     private string[string] headers;
@@ -395,9 +397,7 @@ struct HTTPResponse
         statusCode = code;
         statusMessage = message;
         
-        // Set default headers
-        headers["Server"] = "Aurora/0.1";
-        headers["Connection"] = "keep-alive";
+        validateReasonPhrase(message);
     }
     
     /**
@@ -405,6 +405,21 @@ struct HTTPResponse
      */
     void setHeader(string name, string value)
     {
+        if (!isValidHeaderName(name))
+            throw new Exception("Invalid HTTP response header name");
+        if (!isValidHeaderValue(value))
+            throw new Exception("Invalid HTTP response header value");
+
+        // HTTP field names are case-insensitive. Replacing an existing field
+        // avoids emitting ambiguous duplicates with different casing.
+        foreach (existingName, ref existingValue; headers)
+        {
+            if (asciiEqualsIgnoreCase(existingName, name))
+            {
+                existingValue = value;
+                return;
+            }
+        }
         headers[name] = value;
     }
     
@@ -415,7 +430,9 @@ struct HTTPResponse
     void setStatus(int code, string message = "")
     {
         statusCode = code;
-        statusMessage = (message.length > 0) ? message : getStatusText(code);
+        auto resolvedMessage = (message.length > 0) ? message : getStatusText(code);
+        validateReasonPhrase(resolvedMessage);
+        statusMessage = resolvedMessage;
     }
     
     /**
@@ -441,13 +458,16 @@ struct HTTPResponse
     /// Get content type
     @property string getContentType() const
     {
-        if (auto ct = "Content-Type" in headers)
-            return *ct;
-        return "text/html";  // Default
+        foreach (name, value; headers)
+        {
+            if (asciiEqualsIgnoreCase(name, "Content-Type"))
+                return value;
+        }
+        return DEFAULT_CONTENT_TYPE;
     }
 
     /// Get response headers
-    @property ref inout(string[string]) getHeaders() inout
+    @property ref const(string[string]) getHeaders() const
     {
         return headers;
     }
@@ -458,7 +478,6 @@ struct HTTPResponse
     void setBody(string content)
     {
         bodyContent = content;
-        headers["Content-Length"] = content.length.to!string;
     }
     
     /**
@@ -466,33 +485,95 @@ struct HTTPResponse
      */
     string build() const
     {
-        auto result = appender!string();
+        auto buffer = new ubyte[estimateSize()];
+        auto written = buildInto(buffer);
+        return cast(string)buffer[0 .. written];
+    }
 
-        // Status line
-        result ~= "HTTP/1.1 ";
-        result ~= statusCode.to!string;
-        result ~= " ";
-        result ~= statusMessage;
-        result ~= "\r\n";
-
-        // Headers
-        foreach (name, value; headers)
+    private static bool asciiEqualsIgnoreCase(
+        const(char)[] left,
+        const(char)[] right
+    ) @nogc nothrow pure
+    {
+        if (left.length != right.length)
+            return false;
+        foreach (index; 0 .. left.length)
         {
-            result ~= name;
-            result ~= ": ";
-            result ~= value;
-            result ~= "\r\n";
+            char a = left[index];
+            char b = right[index];
+            if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
+            if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+            if (a != b)
+                return false;
         }
+        return true;
+    }
 
-        result ~= "\r\n";
-
-        // Body
-        if (bodyContent.length > 0)
+    private static bool isValidHeaderName(const(char)[] name) @nogc nothrow pure
+    {
+        if (name.length == 0)
+            return false;
+        foreach (c; name)
         {
-            result ~= bodyContent;
+            bool alphaNumeric = (c >= '0' && c <= '9') ||
+                (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+            bool punctuation = c == '!' || c == '#' || c == '$' ||
+                c == '%' || c == '&' || c == '\'' || c == '*' ||
+                c == '+' || c == '-' || c == '.' || c == '^' ||
+                c == '_' || c == '`' || c == '|' || c == '~';
+            if (!alphaNumeric && !punctuation)
+                return false;
         }
+        return true;
+    }
 
-        return result.data;
+    private static bool isValidHeaderValue(const(char)[] value) @nogc nothrow pure
+    {
+        foreach (c; value)
+        {
+            auto byteValue = cast(ubyte)c;
+            if ((byteValue < 0x20 && c != '\t') || byteValue == 0x7f)
+                return false;
+        }
+        return true;
+    }
+
+    private static void validateReasonPhrase(const(char)[] phrase)
+    {
+        if (!isValidHeaderValue(phrase))
+            throw new Exception("Invalid HTTP response reason phrase");
+    }
+
+    private static bool isFrameworkFramingHeader(const(char)[] name)
+        @nogc nothrow pure
+    {
+        return asciiEqualsIgnoreCase(name, "Content-Length") ||
+            asciiEqualsIgnoreCase(name, "Connection") ||
+            asciiEqualsIgnoreCase(name, "Transfer-Encoding");
+    }
+
+    private static bool statusAllowsContent(int status) @nogc nothrow pure
+    {
+        return !((status >= 100 && status < 200) ||
+            status == 204 || status == 205 || status == 304);
+    }
+
+    private static size_t decimalLength(size_t value) @nogc nothrow pure
+    {
+        size_t length = 1;
+        while (value >= 10)
+        {
+            value /= 10;
+            ++length;
+        }
+        return length;
+    }
+
+    private static size_t signedDecimalLength(int value) @nogc nothrow pure
+    {
+        if (value >= 0)
+            return decimalLength(cast(size_t)value);
+        return 1 + decimalLength(cast(size_t)(-cast(long)value));
     }
 
     /**
@@ -559,32 +640,41 @@ struct HTTPResponse
      *
      * Performance: O(headers count), < 1μs
      */
-    size_t estimateSize() const @nogc pure
+    size_t estimateSize(
+        bool keepAlive = true,
+        bool suppressBody = false
+    ) const @nogc pure
     {
-        size_t size = 0;
+        size_t size = 9 + signedDecimalLength(statusCode) + 1 +
+            statusMessage.length + 2;
+        bool hasContentType = false;
+        bool hasServer = false;
 
-        // Status line: "HTTP/1.1 NNN Message\r\n"
-        // "HTTP/1.1 " = 9 bytes
-        // status code = max 3 digits
-        // " " = 1 byte
-        // status message = variable (max ~50 for standard messages)
-        // "\r\n" = 2 bytes
-        size += 9 + 3 + 1 + statusMessage.length + 2;
-
-        // Headers: "Name: Value\r\n"
         foreach (name, value; headers)
         {
-            size += name.length + 2 + value.length + 2;  // ": " + "\r\n"
+            if (isFrameworkFramingHeader(name))
+                continue;
+            if (asciiEqualsIgnoreCase(name, "Content-Type"))
+                hasContentType = true;
+            if (asciiEqualsIgnoreCase(name, "Server"))
+                hasServer = true;
+            size += name.length + 2 + value.length + 2;
         }
 
-        // Blank line
+        if (!hasContentType)
+            size += "Content-Type: ".length + DEFAULT_CONTENT_TYPE.length + 2;
+        if (!hasServer)
+            size += "Server: ".length + SERVER_HEADER.length + 2;
+
+        bool contentAllowed = statusAllowsContent(statusCode);
+        if (contentAllowed)
+            size += "Content-Length: ".length + decimalLength(bodyContent.length) + 2;
+        size += "Connection: ".length +
+            (keepAlive ? "keep-alive".length : "close".length) + 2;
         size += 2;
-
-        // Body
-        size += bodyContent.length;
-
-        // Add 10% safety margin for any edge cases
-        return size + (size / 10);
+        if (contentAllowed && !suppressBody)
+            size += bodyContent.length;
+        return size;
     }
 
     /**
@@ -613,7 +703,11 @@ struct HTTPResponse
      * }
      * ---
      */
-    size_t buildInto(ubyte[] buffer) const @trusted
+    size_t buildInto(
+        ubyte[] buffer,
+        bool keepAlive = true,
+        bool suppressBody = false
+    ) const @trusted @nogc nothrow
     {
         size_t pos = 0;
 
@@ -635,6 +729,19 @@ struct HTTPResponse
             return writeString(buf[0 .. len]);
         }
 
+        bool writeSize(size_t value)
+        {
+            char[20] digits;
+            size_t cursor = digits.length;
+            do
+            {
+                digits[--cursor] = cast(char)('0' + value % 10);
+                value /= 10;
+            }
+            while (value > 0);
+            return writeString(digits[cursor .. $]);
+        }
+
         // 1. Status line: "HTTP/1.1 200 OK\r\n"
         if (!writeString("HTTP/1.1 ")) return 0;
         if (!writeInt(statusCode)) return 0;
@@ -642,20 +749,53 @@ struct HTTPResponse
         if (!writeString(statusMessage)) return 0;
         if (!writeString("\r\n")) return 0;
 
-        // 2. Headers: "Name: Value\r\n"
+        bool hasContentType = false;
+        bool hasServer = false;
         foreach (name, value; headers)
         {
+            if (isFrameworkFramingHeader(name))
+                continue;
+            if (asciiEqualsIgnoreCase(name, "Content-Type"))
+                hasContentType = true;
+            if (asciiEqualsIgnoreCase(name, "Server"))
+                hasServer = true;
             if (!writeString(name)) return 0;
             if (!writeString(": ")) return 0;
             if (!writeString(value)) return 0;
             if (!writeString("\r\n")) return 0;
         }
 
+        if (!hasContentType)
+        {
+            if (!writeString("Content-Type: ")) return 0;
+            if (!writeString(DEFAULT_CONTENT_TYPE)) return 0;
+            if (!writeString("\r\n")) return 0;
+        }
+
+        if (!hasServer)
+        {
+            if (!writeString("Server: ")) return 0;
+            if (!writeString(SERVER_HEADER)) return 0;
+            if (!writeString("\r\n")) return 0;
+        }
+
+        bool contentAllowed = statusAllowsContent(statusCode);
+        if (contentAllowed)
+        {
+            if (!writeString("Content-Length: ")) return 0;
+            if (!writeSize(bodyContent.length)) return 0;
+            if (!writeString("\r\n")) return 0;
+        }
+
+        if (!writeString("Connection: ")) return 0;
+        if (!writeString(keepAlive ? "keep-alive" : "close")) return 0;
+        if (!writeString("\r\n")) return 0;
+
         // 3. Blank line
         if (!writeString("\r\n")) return 0;
 
         // 4. Body
-        if (bodyContent.length > 0)
+        if (contentAllowed && !suppressBody && bodyContent.length > 0)
         {
             if (!writeString(bodyContent)) return 0;
         }

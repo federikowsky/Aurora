@@ -234,6 +234,24 @@ void benchBuildResponse()
     sw.stop();
     
     printResult("  buildResponseInto (stack buffer)", sw.peek, ITERATIONS);
+
+    auto response = HTTPResponse(200, "OK");
+    response.setHeader("Content-Type", "text/plain");
+    response.setBody("Hello, World!");
+
+    foreach (_; 0 .. WARMUP)
+    {
+        auto len = response.buildInto(buffer[], true, false);
+    }
+
+    sw = StopWatch(AutoStart.yes);
+    foreach (_; 0 .. ITERATIONS)
+    {
+        auto len = response.buildInto(buffer[], true, false);
+    }
+    sw.stop();
+
+    printResult("  HTTPResponse.buildInto (stack buffer)", sw.peek, ITERATIONS);
     writeln();
 }
 
@@ -295,8 +313,7 @@ void benchFullRequest()
         }
         
         // 4. Build response
-        auto len = buildResponseInto(buffer[], resp.status, 
-            resp.getContentType(), resp.getBody(), true);
+        auto len = resp.buildInto(buffer[], true, false);
     }
     
     auto sw = StopWatch(AutoStart.yes);
@@ -318,8 +335,7 @@ void benchFullRequest()
         }
         
         // 4. Build response 
-        auto len = buildResponseInto(buffer[], resp.status, 
-            resp.getContentType(), resp.getBody(), true);
+        auto len = resp.buildInto(buffer[], true, false);
     }
     sw.stop();
     

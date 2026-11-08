@@ -1229,6 +1229,76 @@ unittest
     assert(output.canFind("X-Request-Id"), "Should have X-Request-Id");
 }
 
+@("Response wire serialization owns framing and preserves application headers")
+unittest
+{
+    import std.algorithm : canFind;
+    import std.string : endsWith;
+
+    auto resp = HTTPResponse(201, "Created");
+    resp.setHeader("content-type", "text/plain");
+    resp.setHeader("X-Aurora-Probe", "preserved");
+    resp.setHeader("Content-Length", "999");
+    resp.setHeader("Connection", "upgrade");
+    resp.setHeader("Transfer-Encoding", "chunked");
+    resp.setBody("created");
+
+    auto required = resp.estimateSize(false, false);
+    auto buffer = new ubyte[required];
+    auto written = resp.buildInto(buffer, false, false);
+    written.shouldEqual(required);
+
+    auto output = cast(string)buffer;
+    assert(output.canFind("X-Aurora-Probe: preserved\r\n"));
+    assert(output.canFind("content-type: text/plain\r\n"));
+    assert(output.canFind("Content-Length: 7\r\n"));
+    assert(output.canFind("Connection: close\r\n"));
+    assert(!output.canFind("Transfer-Encoding"));
+    assert(output.endsWith("\r\n\r\ncreated"));
+}
+
+@("Response wire serialization suppresses forbidden response bodies")
+unittest
+{
+    import std.algorithm : canFind;
+    import std.string : endsWith;
+
+    auto head = HTTPResponse(200, "OK");
+    head.setBody("hidden");
+    auto headBuffer = new ubyte[head.estimateSize(false, true)];
+    head.buildInto(headBuffer, false, true).shouldEqual(headBuffer.length);
+    auto headOutput = cast(string)headBuffer;
+    assert(headOutput.canFind("Content-Length: 6\r\n"));
+    assert(headOutput.endsWith("\r\n\r\n"));
+
+    auto noContent = HTTPResponse(204, "No Content");
+    noContent.setBody("must-not-be-sent");
+    auto noContentBuffer = new ubyte[noContent.estimateSize(false, false)];
+    noContent.buildInto(noContentBuffer, false, false)
+        .shouldEqual(noContentBuffer.length);
+    auto noContentOutput = cast(string)noContentBuffer;
+    assert(!noContentOutput.canFind("Content-Length"));
+    assert(!noContentOutput.canFind("must-not-be-sent"));
+    assert(noContentOutput.endsWith("\r\n\r\n"));
+}
+
+@("Response headers are case-insensitive and reject response splitting")
+unittest
+{
+    import std.algorithm : canFind;
+
+    auto resp = HTTPResponse(200, "OK");
+    resp.setHeader("X-Probe", "first");
+    resp.setHeader("x-probe", "second");
+    auto output = resp.build();
+    assert(output.canFind("X-Probe: second\r\n"));
+    assert(!output.canFind("first"));
+
+    resp.setHeader("Bad\r\nInjected", "value").shouldThrow!Exception;
+    resp.setHeader("X-Probe", "value\r\nInjected: yes").shouldThrow!Exception;
+    resp.setStatus(200, "OK\r\nInjected: yes").shouldThrow!Exception;
+}
+
 // Test 65: Request isComplete
 @("Request isComplete for complete request")
 unittest

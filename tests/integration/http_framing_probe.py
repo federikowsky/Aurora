@@ -71,6 +71,16 @@ def response_headers(response: bytes) -> dict[bytes, bytes]:
     return result
 
 
+def request_until_close(request: bytes) -> tuple[bytes, dict[bytes, bytes], bytes]:
+    with socket.create_connection((HOST, PORT), timeout=2.0) as connection:
+        connection.sendall(request)
+        response = receive_all(connection)
+
+    header_block, separator, body = response.partition(b"\r\n\r\n")
+    assert separator, response
+    return response, response_headers(response), body
+
+
 def wait_until_ready(process: subprocess.Popen[bytes]) -> None:
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
@@ -196,6 +206,62 @@ def verify_write_timeout_closes_slow_reader() -> None:
         assert 0 < actual < declared, (actual, declared)
 
 
+def verify_response_contract() -> None:
+    response, headers, body = request_until_close(
+        b"GET /response-headers HTTP/1.1\r\n"
+        b"Host: localhost\r\n"
+        b"Connection: close\r\n\r\n"
+    )
+    assert response.startswith(b"HTTP/1.1 201 Created\r\n"), response
+    assert headers.get(b"x-aurora-probe") == b"preserved", response
+    assert headers.get(b"content-type") == b"text/plain", response
+    assert headers.get(b"content-length") == b"7", response
+    assert headers.get(b"connection") == b"close", response
+    assert body == b"created", response
+
+    response, headers, body = request_until_close(
+        b"HEAD /response-head HTTP/1.1\r\n"
+        b"Host: localhost\r\n"
+        b"Connection: close\r\n\r\n"
+    )
+    assert response.startswith(b"HTTP/1.1 200 OK\r\n"), response
+    assert headers.get(b"x-aurora-probe") == b"head", response
+    assert headers.get(b"content-length") == b"6", response
+    assert body == b"", response
+
+    for path, status, marker in (
+        (b"/response-no-content", b"204 No Content", b"no-content"),
+        (b"/response-not-modified", b"304 Not Modified", b"not-modified"),
+    ):
+        response, headers, body = request_until_close(
+            b"GET " + path + b" HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Connection: close\r\n\r\n"
+        )
+        assert response.startswith(b"HTTP/1.1 " + status + b"\r\n"), response
+        assert headers.get(b"x-aurora-probe") == marker, response
+        assert b"content-length" not in headers, response
+        assert body == b"", response
+
+    response, headers, _ = request_until_close(
+        b"GET /response-not-modified HTTP/1.1\r\n"
+        b"Host: localhost\r\n"
+        b"Connection: close\r\n\r\n"
+    )
+    assert headers.get(b"etag") == b'"aurora-probe"', response
+
+    response, headers, body = request_until_close(
+        b"HEAD /response-error HTTP/1.1\r\n"
+        b"Host: localhost\r\n"
+        b"Connection: close\r\n\r\n"
+    )
+    error_representation = b'{"error":"Internal Server Error"}'
+    assert response.startswith(b"HTTP/1.1 500 Internal Server Error\r\n"), response
+    assert headers.get(b"content-type") == b"application/json", response
+    assert headers.get(b"content-length") == str(len(error_representation)).encode(), response
+    assert body == b"", response
+
+
 def main() -> int:
     binary = Path(
         sys.argv[1]
@@ -221,6 +287,8 @@ def main() -> int:
         print("connection-retirement-header: PASS")
         verify_write_timeout_closes_slow_reader()
         print("write-timeout: PASS")
+        verify_response_contract()
+        print("response-contract: PASS")
         return 0
     finally:
         if process.poll() is None:

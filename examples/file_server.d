@@ -165,7 +165,6 @@ class StaticFileHandler
             // Set headers
             ctx.status(200)
                .header("Content-Type", mimeType)
-               .header("Content-Length", fileSize.to!string)
                .header("ETag", `"` ~ etag ~ `"`)
                .header("Last-Modified", formatHttpDate(modTime))
                .header("Cache-Control", format("public, max-age=%d", cacheMaxAge.total!"seconds"))
