@@ -10,14 +10,14 @@ Descriptive, not a future specification. Reconciled on 25 October 2026 after sel
 4. [Router](../source/aurora/web/router.d) matches method/path and extracts parameters. `handleWithRouter` creates a per-request `Context` and `HTTPResponse`, invokes hooks and, only after a successful match, the global pipeline and handler.
 5. [Context](../source/aurora/web/context.d) exposes borrowed request/response pointers, parameters, small storage and response/upgrade helpers. Domain work remains in the handler. JSON decoding, validation and serialization are explicit calls today, not an automatic typed-input pipeline.
 6. `HTTPResponse` accumulates application output and is the authoritative buffered response representation. The runtime serializes it directly, preserving application fields while deriving framing and body suppression from status, request method and connection lifecycle.
-7. The writer applies write deadlines; connection code decides keep-alive/retirement, compacts remaining input and cleans up. Hijack and request-admission lifetimes have known defects described in the state register.
+7. The writer applies write deadlines; connection code decides keep-alive/retirement, compacts remaining input and cleans up. An admitted request holds its Server-wide reservation through dispatch and writing, releasing at iteration exit. Hijack has a separate ownership defect described in the state register.
 
 ## Responsibility map
 
 | Owner | Actual responsibility / boundary | Cost or unresolved contract |
 |---|---|---|
 | Aurora App/Router | Registration, selection, parameters, global middleware orchestration | Runtime trie child search; local router middleware is stored but not dispatched |
-| Aurora Server/WorkerPool | Connection lifecycle, message framing, dispatch, deadlines, admission, worker coordination | Duplicated metrics/state; admission scope and shutdown need validation |
+| Aurora Server/WorkerPool | Connection lifecycle, message framing, dispatch, deadlines, admission, worker coordination | Server-wide request reservation; duplicated metrics/state and broader shutdown remain open |
 | Wire | Native HTTP field parser and D request wrapper | Live wrappers own independent parsers; field views still borrow the caller's input buffer |
 | Aurora HTTP/Context | Request conveniences, authoritative buffered response representation, per-request application access | Convenience accessors can copy/allocate; repeated response fields are not representable |
 | FastjsonD | Native JSON document/value parsing used by Aurora's schema mapper | Aurora retains its own template serialization/mapping; separate std.json validation mapper also exists |
