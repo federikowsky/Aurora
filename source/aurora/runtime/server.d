@@ -2034,7 +2034,7 @@ final class Server
                 responseData = cast(ubyte[])"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
             }
             
-            // If hijacked, external handler owns the connection
+            // Direct transport output suppresses the buffered HTTP response.
             if (wasHijacked)
                 return;
             
@@ -2134,8 +2134,7 @@ final class Server
             // Check if connection was hijacked
             if (ctx.isHijacked())
             {
-                // Connection is now owned by external handler
-                // Do NOT send response, do NOT close connection
+                // The outer connection scope still accounts and closes it.
                 return RouterResult(null, true);
             }
             

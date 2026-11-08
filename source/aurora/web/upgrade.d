@@ -26,14 +26,11 @@ import vibe.core.net : TCPConnection;
 // ============================================================================
 
 /**
- * A hijacked connection for external protocol handlers.
- *
- * OWNERSHIP SEMANTICS (Go-style):
- * After calling ctx.hijack(), the external handler is FULLY RESPONSIBLE for:
- * - Reading/writing to the connection
- * - Closing the connection when done (call close())
- *
- * Aurora will NOT close the connection automatically after hijack().
+ * Direct transport access for a protocol handler on the current worker.
+ * Calling ctx.hijack() suppresses the ordinary HTTP response. Finish I/O
+ * and close inside the handler: Aurora's connection cleanup still closes
+ * the socket when the handler returns. Copying the wrapper or borrowing
+ * its file descriptor does not extend that lifetime.
  *
  * Example:
  * ---
@@ -128,10 +125,8 @@ struct HijackedConnection {
     }
 
     /**
-     * Close the connection. MUST be called when done.
-     *
-     * After hijack(), Aurora does NOT close the connection automatically.
-     * The external handler is responsible for closing.
+     * Close the connection while the handler owns direct I/O. Do not use
+     * the wrapper or its borrowed file descriptor after the handler returns.
      */
     void close() @trusted nothrow {
         if (_valid) {
