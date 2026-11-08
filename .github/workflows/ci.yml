@@ -18,6 +18,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  admission-cost:
+    if: github.event_name == 'pull_request'
+    name: Admission A/A–A/B evidence (not a readiness gate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DUB_HOME: ${{ github.workspace }}/.cost-home
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc-1.42.0
+      - name: Build pinned servers and load generator
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/cost
+          git rev-parse HEAD > artifacts/cost/candidate-sha.txt
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git worktree add --detach ../cost-base "$BASE_SHA"
+          git -C ../cost-base rev-parse HEAD > artifacts/cost/base-sha.txt
+          git status --porcelain=v1 > artifacts/cost/status.txt
+          uname -a > artifacts/cost/uname.txt
+          lscpu > artifacts/cost/lscpu.txt
+          free -h > artifacts/cost/memory.txt
+          for metric_file in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max; do
+            if [ -r "$metric_file" ]; then
+              echo "$metric_file: $(cat "$metric_file")"
+            else
+              echo "$metric_file: unavailable; quota UNVERIFIED"
+            fi
+          done > artifacts/cost/quotas.txt
+          ldc2 --version > artifacts/cost/ldc.txt
+          dub --version > artifacts/cost/dub.txt
+          c++ --version > artifacts/cost/cxx.txt
+          (cd ../cost-base && dub build benchmarks/server.d --single --compiler=ldc2 --build=release) 2>&1 | tee artifacts/cost/base-build.log
+          dub build benchmarks/server.d --single --compiler=ldc2 --build=release 2>&1 | tee artifacts/cost/candidate-build.log
+          git clone --no-tags https://github.com/wg/wrk.git ../cost-wrk
+          git -C ../cost-wrk checkout --detach a211dd5a7050b1f9e8a9870b95513060e72ac4a0
+          git -C ../cost-wrk rev-parse HEAD > artifacts/cost/wrk-sha.txt
+          make -C ../cost-wrk -j2 WITH_OPENSSL=/usr > artifacts/cost/wrk-build.log 2>&1
+          ldd ../cost-wrk/wrk > artifacts/cost/wrk-libraries.txt
+      - name: Collect rotating identical-baseline and candidate comparisons
+        run: |
+          set -o pipefail
+          python3 benchmarks/compare_admission.py ../cost-base/benchmarks/aurora_benchmark ./benchmarks/aurora_benchmark ../cost-wrk/wrk artifacts/cost/disabled | tee artifacts/cost/progress.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aurora-admission-cost-${{ github.event.pull_request.head.sha }}
+          path: artifacts/cost
+          if-no-files-found: error
+
   dub:
     name: DUB build and unit tests (LDC)
     runs-on: ubuntu-24.04
@@ -104,17 +162,27 @@ jobs:
             | tee artifacts/ci/http-protocol-probe.log
 
       - name: Collect release microbenchmark evidence
+        # Keep admission checks separate from throughput evidence.
         run: |
           set -o pipefail
           dub run benchmarks/microbench.d --single \
             --compiler=ldc2 --build=release 2>&1 \
             | tee artifacts/ci/microbench.log
 
+      - name: Check request admission in debug and release
+        run: |
+          set -o pipefail
+          for build in debug release; do
+            dub build tests/integration/admission_probe_server.d --single --compiler=ldc2 --build="$build" 2>&1 | tee "artifacts/ci/admission-$build-build.log"
+            python3 tests/integration/http_admission_probe.py ./tests/integration/aurora_admission_probe_server 2>&1 | tee "artifacts/ci/admission-$build.log"
+          done
+
       - name: Check canonical benchmark configuration
         run: |
           set -o pipefail
           dub build benchmarks/server.d --single --compiler=ldc2 --build=release 2>&1 | tee artifacts/ci/benchmark-build.log
           python3 tests/integration/benchmark_config_probe.py ./benchmarks/aurora_benchmark 2>&1 | tee artifacts/ci/benchmark-config.log
+          python3 tests/integration/benchmark_measurement_test.py 2>&1 | tee artifacts/ci/benchmark-measurement-tests.log
 
       - name: Collect D-GC allocation evidence
         run: |

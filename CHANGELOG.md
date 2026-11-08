@@ -8,6 +8,8 @@
 - Extend the socket probe, unit suite and allocation/microbenchmark fixtures to exercise the response path actually used by the runtime.
 
 - Select Wire `6c5965eb71dbe81a9abc74832bf7a8020835ae5b`, whose exclusive parser leases keep overlapping live `HTTPRequest` values independent while preserving sequential parser reuse. Add a consumer-level lifetime regression and document the remaining borrowed input-buffer contract.
+- Hold Server-wide request admission through dispatch and response writing; roll back rejection before writing 503. Previously the configured limit was ineffective. Applications must size it as a total Server budget, not per-worker. Add debug/release socket regression coverage.
+- Expose canonical benchmark worker/admission settings and collect controlled A/A–A/B evidence with process CPU, output checks and raw errors.
 
 - Own the process-wide logger mutex and normal shutdown at module scope; join/drain the daemon before runtime finalization. Add debug/release process-exit and concurrent-first-access checks.
 

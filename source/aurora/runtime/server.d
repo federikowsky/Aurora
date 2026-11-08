@@ -719,7 +719,7 @@ struct ServerConfig
     /// Low water mark - resume accepting connections when below this % of maxConnections
     float connectionLowWater = 0.6;
     
-    /// Maximum in-flight requests per worker (0 = unlimited)
+    /// Maximum active requests across this Server, including response writes (0 = unlimited)
     uint maxInFlightRequests = 1000;
     
     /// Behavior when server is overloaded
@@ -1956,10 +1956,11 @@ final class Server
             if (config.maxInFlightRequests > 0)
             {
                 auto inFlight = atomicOp!"+="(currentInFlightRequests, 1);
-                scope(exit) atomicOp!"-="(currentInFlightRequests, 1);
                 
                 if (inFlight > config.maxInFlightRequests)
                 {
+                    // Rejected work owns no permit while its error is written.
+                    atomicOp!"-="(currentInFlightRequests, 1);
                     atomicOp!"+="(rejectedInFlight, 1);
                     auto writer = ResponseWriter(
                         conn,
@@ -1996,6 +1997,14 @@ final class Server
                 }
             }
             
+            // The iteration owns the admitted request through dispatch and write.
+            // Release on every return/break/exception, and before the next read.
+            scope(exit)
+            {
+                if (config.maxInFlightRequests > 0)
+                    atomicOp!"-="(currentInFlightRequests, 1);
+            }
+
             // Handle request
             ubyte[] responseData;
             bool wasHijacked = false;
