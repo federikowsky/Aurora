@@ -168,6 +168,14 @@ struct HTTPRequest
         if (!valid) return "";
         return wrapper.getVersion().toString();
     }
+
+    /// Use the parsed version directly; the formatted Wire accessor has a fallback.
+    package(aurora) bool isHTTP11() @trusted @nogc nothrow
+    {
+        if (!valid) return false;
+        auto parsed = &wrapper.request();
+        return parsed.getVersionMajor() == 1 && parsed.getVersionMinor() == 1;
+    }
     
     /**
      * Get header by name (case-insensitive)

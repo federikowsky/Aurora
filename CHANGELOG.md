@@ -2,6 +2,7 @@
 
 ## Unreleased — 8 November 2026
 
+- Validate WebSocket upgrades against the real HTTP method and version, and pin Aurora-WebSocket's 16-byte opening key validation. Non-GET, HTTP/1.0 and malformed keys no longer get a 101 response. The synchronous socket test runs in debug and release.
 - Make `HTTPResponse` the authoritative buffered response contract. Preserve application fields end to end, derive framing from final state, enforce HEAD/1xx/204/205/304 body rules and reject response-splitting field syntax.
 - Make `getHeaders()` read-only; callers mutating its map must use `setHeader` or `Context.header` so field validation cannot be bypassed.
 - Remove duplicated default/framing fields from the per-request hash map. The minimal response lifecycle and routed no-I/O profile now measure 0 D-GC B/op in their stated preallocated scope; this is not an end-to-end zero-allocation claim.

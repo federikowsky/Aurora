@@ -349,16 +349,10 @@ class WebSocket {
  * ---
  */
 WebSocket upgradeWebSocket(ref Context ctx, WebSocketConfig config = WebSocketConfig.init) @safe {
-    import aurora_websocket : 
-        validateUpgradeRequest, 
-        buildUpgradeResponse,
-        selectSubprotocol,
-        WebSocketConnection;
-    import aurora_websocket.connection : ConnectionMode;
-    import WsConfigMod = aurora_websocket.connection;
+    import aurora_websocket : validateUpgradeRequest, selectSubprotocol;
 
     // Step 1: Check if this is a WebSocket upgrade request
-    if (!ctx.isWebSocketUpgrade()) {
+    if (!ctx.isWebSocketUpgrade() || !ctx.request.isHTTP11()) {
         return null;
     }
 
@@ -389,7 +383,7 @@ WebSocket upgradeWebSocket(ref Context ctx, WebSocketConfig config = WebSocketCo
     }
 
     // Step 3: Validate the upgrade request
-    auto validation = validateUpgradeRequest("GET", headers);
+    auto validation = validateUpgradeRequest(ctx.request.methodRaw().idup, headers);
     if (!validation.valid) {
         return null;
     }

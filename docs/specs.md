@@ -22,7 +22,7 @@ Descriptive, not a future specification. Reconciled on 25 October 2026 after sel
 | Aurora HTTP/Context | Request conveniences, authoritative buffered response representation, per-request application access | Convenience accessors can copy/allocate; repeated response fields are not representable |
 | FastjsonD | Native JSON document/value parsing used by Aurora's schema mapper | Aurora retains its own template serialization/mapping; separate std.json validation mapper also exists |
 | Aurora schema/middleware | UDA validation, JSON mapping, middleware validation | Distinct error/default semantics, silent conversion failures and duplicate exception names |
-| Aurora-WebSocket | WebSocket protocol/types used by upgrade helpers | Aurora owns HTTP handoff; asynchronous ownership and full protocol validation remain open |
+| Aurora-WebSocket | Opening handshake, nonce validation and WebSocket frames | Aurora supplies the parsed method and enforces HTTP/1.1 at its transport boundary. Asynchronous ownership and full protocol validation remain open |
 | vibe-core / eventcore | Task/fiber scheduling and network/event services | Aurora adds worker coordination; no demonstrated reason yet to replace this stack |
 | Phobos / D runtime | Standard facilities, atomics/threads, D-GC and runtime lifecycle | AOT compilation; GC and native allocation are separate accounting domains |
 | C/C++ runtime / OS | Native dependency allocation, socket/kernel I/O | Native bytes, syscall and CPU costs must be included in end-to-end profiles |
