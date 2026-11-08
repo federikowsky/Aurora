@@ -150,8 +150,8 @@ class CompressionMiddleware
                 // Set Content-Encoding header
                 ctx.response.setHeader("Content-Encoding", method);
                 
-                // Update Content-Length (setBody already does this, but ensure it's correct)
-                ctx.response.setHeader("Content-Length", compressed.length.to!string);
+                // The response serializer derives Content-Length from the
+                // final body, so no framing state needs to be synchronized.
             }
         }
         catch (Exception e)

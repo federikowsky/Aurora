@@ -4,7 +4,7 @@
 
 Aurora is an HTTP/1.1 backend framework for D. Its goal is a simple application surface, explicit semantics and exceptional real efficiency. The current implementation provides `App`, routing, `Context`, opt-in middleware, JSON helpers and fiber-based networking.
 
-**Engineering preview.** Production readiness, complete HTTP compliance and end-to-end zero allocation are not established. Important response, request-lifetime and runtime contracts remain open; see the revision-qualified [engineering state](docs/ENGINEERING_STATUS.md). A passing CI badge covers that workflow's checks, not all public promises.
+**Engineering preview.** Production readiness, complete HTTP compliance and end-to-end zero allocation are not established. Important runtime and operational contracts remain open; see the revision-qualified [engineering state](docs/ENGINEERING_STATUS.md). A passing CI badge covers that workflow's checks, not all public promises.
 
 ## First local service
 

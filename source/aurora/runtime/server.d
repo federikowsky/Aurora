@@ -2134,10 +2134,9 @@ final class Server
             _hooks.executeOnResponse(ctx);
             
             auto respData = buildResponse(
-                response.status,
-                response.getContentType(),
-                response.getBody(),
-                keepAlive
+                response,
+                keepAlive,
+                isHeadMethod(request.methodRaw())
             );
             return RouterResult(respData, false);
         }
@@ -2159,27 +2158,59 @@ final class Server
                 // Handler executed - return the response it set
                 _hooks.executeOnResponse(ctx);
                 auto respData = buildResponse(
-                    response.status,
-                    response.getContentType(),
-                    response.getBody(),
-                    keepAlive
+                    response,
+                    keepAlive,
+                    isHeadMethod(request.methodRaw())
                 );
                 return RouterResult(respData, false);
             }
             catch (Exception)
             {
                 // No handler found or handler failed - return 500
-                return RouterResult(
-                    buildResponse(
-                        500,
-                        "application/json",
-                        `{"error":"Internal Server Error"}`,
-                        keepAlive
-                    ),
-                    false
-                );
+                auto errorResponse = HTTPResponse(500, "Internal Server Error");
+                errorResponse.setHeader("Content-Type", "application/json");
+                errorResponse.setBody(`{"error":"Internal Server Error"}`);
+                return RouterResult(buildResponse(
+                    errorResponse,
+                    keepAlive,
+                    isHeadMethod(request.methodRaw())
+                ), false);
             }
         }
+    }
+
+    private static bool isHeadMethod(const(char)[] method) @nogc nothrow pure
+    {
+        return method.length == 4 &&
+            (method[0] == 'H' || method[0] == 'h') &&
+            (method[1] == 'E' || method[1] == 'e') &&
+            (method[2] == 'A' || method[2] == 'a') &&
+            (method[3] == 'D' || method[3] == 'd');
+    }
+
+    private ubyte[] buildResponse(
+        ref const HTTPResponse response,
+        bool keepAlive,
+        bool suppressBody
+    ) @trusted
+    {
+        enum STACK_SIZE = 4096;
+        auto required = response.estimateSize(keepAlive, suppressBody);
+
+        if (required <= STACK_SIZE)
+        {
+            ubyte[STACK_SIZE] stackBuf;
+            auto len = response.buildInto(stackBuf[], keepAlive, suppressBody);
+            if (len == required)
+                return stackBuf[0 .. len].dup;
+        }
+
+        auto heapBuf = new ubyte[required];
+        auto len = response.buildInto(heapBuf, keepAlive, suppressBody);
+        if (len == required)
+            return heapBuf;
+
+        return cast(ubyte[])"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".dup;
     }
     
     private ubyte[] buildResponse(

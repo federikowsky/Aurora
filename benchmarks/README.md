@@ -21,8 +21,8 @@ With that server running locally, `bash benchmarks/run.sh` uses wrk (4 threads, 
 
 | Fixture | What it measures | What it does not establish |
 |---|---|---|
-| allocation_profile.d | Selected D-GC bytes/op; 10,000 warm-up, 100,000 measured operations, GC disabled during measurement | Native allocation, total network request cost, ordinary GC pause behavior, error/logging/middleware paths |
-| microbench.d | Router, Context, arena and response component timings | Whole-framework efficiency; some loops lack consumed outputs or per-case warm-up, so inspect optimization before trusting tiny timings |
+| allocation_profile.d | Selected D-GC bytes/op; 10,000 warm-up, 100,000 measured operations, GC disabled during measurement; includes the authoritative `HTTPResponse.buildInto` and routed no-I/O path | Native allocation, response-buffer allocation in the real server, total network request cost, ordinary GC pause behavior, error/logging/middleware paths |
+| microbench.d | Router, Context, arena, low-level response builder, authoritative response serializer and routed no-I/O timings | Whole-framework efficiency; some loops lack consumed outputs or per-case warm-up, so inspect optimization before trusting tiny timings |
 | server.d / run.sh | Plaintext, JSON and a delayed fixture over local HTTP | Default protection overhead (limits disabled); `/delay` uses blocking `Thread.sleep`, not asynchronous I/O |
 | comparison/ | Historical competitor fixtures/results | Fair current comparison without frozen equivalent configurations and matching semantics |
 

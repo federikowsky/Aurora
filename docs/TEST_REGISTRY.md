@@ -16,7 +16,7 @@ dub build tests/integration/protocol_probe_server.d --single --compiler=ldc2 --b
 python3 tests/integration/http_framing_probe.py ./tests/integration/aurora_protocol_probe_server
 ```
 
-The Python probe starts/stops its local fixture on port 8080. Ensure that port is free; it exercises fragmented Content-Length, pipelined ordering, fragmented chunked bodies, retirement headers and write timeout. [Source](../tests/integration/http_framing_probe.py) is authoritative for assertions and timeouts.
+The Python probe starts/stops its local fixture on port 8080. Ensure that port is free; it exercises fragmented Content-Length, pipelined ordering, fragmented chunked bodies, retirement headers, write timeout and the response boundary. Response checks cover custom-field preservation, framework-owned framing, connection close, HEAD body suppression on success and fallback error, 204/304 body suppression and ETag preservation. [Source](../tests/integration/http_framing_probe.py) is authoritative for assertions and timeouts.
 
 `DUB_HOME` may select an isolated package cache without changing `HOME`. `--skip-registry=all` is an offline fallback only when all selected dependencies are already available; it is not proof of a clean installation. Preserve and report the selections file and exact dependency revisions.
 
@@ -34,6 +34,7 @@ Unit selection excludes `tests/stress/*`, `tests/realworld/*` and the standalone
 - [Stress tests](../tests/stress) and [realworld fixtures](../tests/realworld/README.md) are experimental and outside ordinary CI. Inspect their dependencies, server assumptions and resource costs before execution.
 - [Benchmarks](../benchmarks/README.md) separate component cost, allocations and network measurements. They are not correctness or readiness substitutes.
 - [Response capacity regressions](../tests/unit/http/response_buffer_test.d) are selected by ordinary unittest and also compiled/run standalone in release by CI. They use `enforce`, so checks survive `-release`.
+- [HTTP response tests](../tests/unit/http/http_test.d) cover exact bounded sizing, framework-owned framing, HEAD/204 suppression, case-insensitive replacement and response-splitting rejection. The socket probe establishes the high-level runtime boundary; unit serialization alone is not an end-to-end guarantee.
 - [HTTP request tests](../tests/unit/http/http_test.d) include the consumer boundary for two simultaneously live requests. Wire owns the underlying parser-lease tests, including non-LIFO release, moves, thread handoff, incomplete input and parse-error isolation.
 
 For a new behavior fix, add the smallest meaningful executable contract test at the failing boundary, run it red then green, exercise relevant exit/error/reuse paths and link raw results. Test selection must follow risk and information gain, not historical suite size. Never report a timed-out, skipped or assertion-disabled run as a pass.
