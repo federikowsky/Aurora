@@ -67,6 +67,7 @@
                 "tests/integration/protocol_probe_server.d",
                 "tests/integration/admission_probe_server.d",
                 "tests/integration/websocket_probe_server.d",
+                "tests/integration/simple_handler_probe_server.d",
                 "tests/fixtures/logger_lifecycle.d",
                 "tests/realworld/*",
                 "tests/stress/*"
@@ -97,6 +98,7 @@
                 "tests/integration/protocol_probe_server.d",
                 "tests/integration/admission_probe_server.d",
                 "tests/integration/websocket_probe_server.d",
+                "tests/integration/simple_handler_probe_server.d",
                 "tests/fixtures/logger_lifecycle.d",
                 "tests/realworld/*",
                 "tests/stress/*"

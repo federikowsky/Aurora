@@ -34,6 +34,12 @@ The App runtime serializes the complete `HTTPResponse`: application headers surv
 
 The low-level `aurora.http.util.buildResponseInto` returns bytes written, or `0` when capacity is insufficient. Exhaustion is sticky: later fragments cannot resume writing. On failure, bytes inside the supplied slice may have changed and must be discarded; bytes outside it are preserved. The capacity regression tests exercise debug and release. This does not make the helper a complete HTTP response model or establish an input/output aliasing contract. See the revision-qualified evidence in the state register.
 
+The direct `Server(RequestHandler, ServerConfig)` entry point passes a borrowed
+request pointer and a borrowed `ref ResponseBuffer` to the handler. The writer
+is valid only for that call; write the response before returning. Handlers made
+for the former by-value signature must add `ref` to their `ResponseBuffer`
+parameter. The by-value form mutated a copy and could not emit a response.
+
 ## Middleware and policies
 
 [MiddlewarePipeline](../source/aurora/web/middleware/package.d) executes registered global middleware around a matched handler. `next()` controls continuation. A global middleware is currently bypassed when no route matches, including an unmatched OPTIONS preflight. Registering `Router.use` currently stores middleware without integrating it into App dispatch; subrouter policy inheritance is not implemented. Do not use it as an authentication boundary.

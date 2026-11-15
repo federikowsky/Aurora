@@ -20,6 +20,7 @@ Descriptive, not a future specification. Reconciled on 25 October 2026 after sel
 | Aurora Server/WorkerPool | Connection lifecycle, message framing, dispatch, deadlines, admission, worker coordination | Server-wide request reservation; duplicated metrics/state and broader shutdown remain open |
 | Wire | Native HTTP field parser and D request wrapper | Live wrappers own independent parsers; field views still borrow the caller's input buffer |
 | Aurora HTTP/Context | Request conveniences, authoritative buffered response representation, per-request application access | Convenience accessors can copy/allocate; repeated response fields are not representable |
+| Aurora low-level RequestHandler | Borrowed parsed request and borrowed `ref ResponseBuffer` for a complete immediate response | Legacy compatibility surface; response storage is allocated when written and cannot escape the call |
 | FastjsonD | Native JSON document/value parsing used by Aurora's schema mapper | Aurora retains its own template serialization/mapping; separate std.json validation mapper also exists |
 | Aurora schema/middleware | UDA validation, JSON mapping, middleware validation | Distinct error/default semantics, silent conversion failures and duplicate exception names |
 | Aurora-WebSocket | Opening handshake, nonce validation, WebSocket frames and terminal stream close | Aurora supplies the parsed method and enforces HTTP/1.1 at its transport boundary. Asynchronous post-handler ownership and full protocol validation remain open |
