@@ -146,6 +146,14 @@ jobs:
           ./artifacts/ci/response-buffer-test 2>&1 \
             | tee artifacts/ci/response-buffer-test.log
 
+      - name: Check low-level RequestHandler response in debug and release
+        run: |
+          set -o pipefail
+          for build in debug release; do
+            dub build tests/integration/simple_handler_probe_server.d --single --compiler=ldc2 --build="$build" 2>&1 | tee "artifacts/ci/simple-handler-$build-build.log"
+            python3 tests/integration/http_simple_handler_probe.py ./tests/integration/aurora_simple_handler_probe_server 2>&1 | tee "artifacts/ci/simple-handler-$build.log"
+          done
+
       - name: Build documented minimal example
         run: |
           set -o pipefail

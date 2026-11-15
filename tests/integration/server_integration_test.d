@@ -125,7 +125,7 @@ unittest
 {
     import aurora.http : HTTPRequest;
     
-    void handler(scope HTTPRequest* req, scope ResponseBuffer writer) @trusted
+    void handler(scope HTTPRequest* req, scope ref ResponseBuffer writer) @trusted
     {
         writer.write(200, "text/plain", "OK");
     }

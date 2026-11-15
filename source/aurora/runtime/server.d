@@ -975,7 +975,10 @@ struct ResponseBuffer
 // ============================================================================
 
 /// Request handler delegate type (legacy compatibility)
-alias RequestHandler = void delegate(scope HTTPRequest* request, scope ResponseBuffer writer) @safe;
+alias RequestHandler = void delegate(
+    scope HTTPRequest* request,
+    scope ref ResponseBuffer writer
+) @safe;
 
 // ============================================================================
 // MAIN SERVER CLASS
