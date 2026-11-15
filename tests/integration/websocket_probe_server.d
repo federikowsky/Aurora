@@ -7,7 +7,7 @@ module tests.integration.websocket_probe_server;
 
 import aurora;
 import aurora.web.websocket;
-import core.time : msecs, seconds;
+import core.time : MonoTime, msecs, seconds;
 import std.conv : to;
 import std.file : exists, write;
 import std.path : buildPath;
@@ -41,6 +41,28 @@ void main(string[] args)
 
     app.get("/sync", &synchronous);
     app.post("/sync", &synchronous);
+
+    void peerClose(ref Context ctx)
+    {
+        auto socket = upgradeWebSocket(ctx);
+        if (socket is null)
+        {
+            ctx.status(400).send("invalid upgrade");
+            return;
+        }
+        scope(exit) socket.close();
+        auto message = socket.receive();
+        if (!message.isNull)
+            return;
+
+        write(buildPath(directory, "peer-close-received"), "receive returned");
+        auto deadline = MonoTime.currTime + 1.seconds;
+        while (MonoTime.currTime < deadline &&
+               !exists(buildPath(directory, "release-peer-close")))
+            sleep(2.msecs);
+    }
+
+    app.get("/peer-close", &peerClose);
     app.onStart(() {
         runTask(() nothrow {
             try

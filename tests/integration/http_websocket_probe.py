@@ -95,6 +95,27 @@ def synchronous(port, directory):
         echo_and_close(peer, reader)
 
 
+def peer_initiated_close(port, directory):
+    release = directory / "release-peer-close"
+    try:
+        with socket.create_connection(("127.0.0.1", port), 5) as peer, peer.makefile("rb") as reader:
+            peer.settimeout(.5)
+            peer.sendall(request(b"/peer-close"))
+            handshake(reader, b"101")
+            send_frame(peer, 8, b"\x03\xe8")
+            frame = reader.read(4)
+            assert frame == b"\x88\x02\x03\xe8", ("expected peer Close reply", frame)
+            wait_for(
+                lambda: (directory / "peer-close-received").exists(),
+                "handler did not observe peer Close",
+            )
+            assert reader.read(1) == b"", (
+                "transport remained open after completed peer Close while handler was active"
+            )
+    finally:
+        release.touch()
+
+
 def reject_invalid(port, **fields):
     with socket.create_connection(("127.0.0.1", port), 5) as peer, peer.makefile("rb") as reader:
         peer.sendall(request(b"/sync", **fields))
@@ -108,6 +129,7 @@ if __name__ == "__main__":
     failed = False
     cases = {
         "synchronous": synchronous,
+        "peer_initiated_close": peer_initiated_close,
         "reject_post": lambda port, _: reject_invalid(port, method=b"POST"),
         "reject_http_1_0": lambda port, _: reject_invalid(port, version=b"1.0"),
         "reject_invalid_alphabet": lambda port, _: reject_invalid(port, key=b"!GhlIHNhbXBsZSBub25jZQ=="),

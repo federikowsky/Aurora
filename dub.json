@@ -14,7 +14,7 @@
         "unit-threaded": "~>2.1.9",
         "aurora-websocket": {
             "repository": "git+https://github.com/federikowsky/Aurora-WebSocket.git",
-            "version": "4bfb2c8f33194edcd6bca4217857174fa82d7bdf"
+            "version": "dacf2f10b0a999d1b373b0b1a16f4c1cd9767bb2"
         },
         "wire": {
             "repository": "git+https://github.com/federikowsky/Wire.git",
