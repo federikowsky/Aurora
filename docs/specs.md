@@ -22,7 +22,7 @@ Descriptive, not a future specification. Reconciled on 25 October 2026 after sel
 | Aurora HTTP/Context | Request conveniences, authoritative buffered response representation, per-request application access | Convenience accessors can copy/allocate; repeated response fields are not representable |
 | FastjsonD | Native JSON document/value parsing used by Aurora's schema mapper | Aurora retains its own template serialization/mapping; separate std.json validation mapper also exists |
 | Aurora schema/middleware | UDA validation, JSON mapping, middleware validation | Distinct error/default semantics, silent conversion failures and duplicate exception names |
-| Aurora-WebSocket | Opening handshake, nonce validation and WebSocket frames | Aurora supplies the parsed method and enforces HTTP/1.1 at its transport boundary. Asynchronous ownership and full protocol validation remain open |
+| Aurora-WebSocket | Opening handshake, nonce validation, WebSocket frames and terminal stream close | Aurora supplies the parsed method and enforces HTTP/1.1 at its transport boundary. Asynchronous post-handler ownership and full protocol validation remain open |
 | vibe-core / eventcore | Task/fiber scheduling and network/event services | Aurora adds worker coordination; no demonstrated reason yet to replace this stack |
 | Phobos / D runtime | Standard facilities, atomics/threads, D-GC and runtime lifecycle | AOT compilation; GC and native allocation are separate accounting domains |
 | C/C++ runtime / OS | Native dependency allocation, socket/kernel I/O | Native bytes, syscall and CPU costs must be included in end-to-end profiles |
@@ -37,7 +37,7 @@ The selected Wire revision gives each live request wrapper an exclusive parser l
 
 `HTTPResponse` stores status, body and only application-supplied fields. The header map remains null for the common response until a field is actually added; `Content-Length`, `Connection` and the default `Server` field are derived during serialization instead of duplicated as mutable state. The runtime passes the response directly to its bounded serializer. Application fields survive, names replace case-insensitively, invalid field syntax is rejected, and HEAD/1xx/204/205/304 body rules are applied at this boundary. The preallocated builder is `@nogc`, keeps capacity exhaustion sticky and returns zero without writing outside its output slice. Partial output on failure must be discarded. Repeated same-name fields remain unsupported because the public map stores one value per name.
 
-`Context.hijack()` marks its local state and returns a connection wrapper, but outer cleanup still closes the connection after dispatch. Synchronous use inside a callback is not proof of escaped asynchronous ownership. Server, worker and logger lifecycle ownership must be checked at actual exit paths, not inferred from API names.
+`Context.hijack()` marks its local state and returns a connection wrapper, but outer cleanup still closes the connection after dispatch. The selected Aurora-WebSocket revision closes its owned stream after a completed peer Close or terminal protocol failure; that does not transfer an upgrade beyond handler return. Synchronous use inside a callback is not proof of escaped asynchronous ownership. Server, worker and logger lifecycle ownership must be checked at actual exit paths, not inferred from API names.
 
 ## Configuration, errors and optional work
 
