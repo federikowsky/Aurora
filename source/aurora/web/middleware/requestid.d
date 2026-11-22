@@ -184,7 +184,7 @@ string getRequestId(ref Context ctx, string storageKey = "requestId")
  *
  * Usage:
  * ---
- * router.use(requestIdMiddleware());
+ * app.use(requestIdMiddleware());
  * ---
  */
 Middleware requestIdMiddleware()
@@ -199,7 +199,7 @@ Middleware requestIdMiddleware()
  * ---
  * auto config = RequestIdConfig();
  * config.headerName = "X-Correlation-ID";
- * router.use(requestIdMiddleware(config));
+ * app.use(requestIdMiddleware(config));
  * ---
  */
 Middleware requestIdMiddleware(RequestIdConfig config)

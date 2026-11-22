@@ -3,10 +3,9 @@
  *
  * Package: aurora.web.middleware.bulkhead
  *
- * Implements the Bulkhead pattern (from "Release It!" by Michael Nygard) to
- * isolate failures between endpoint groups. Like ship bulkheads that prevent
- * sinking, this middleware partitions concurrency pools so overload in one
- * area doesn't cascade to others.
+ * Implements an application-level Bulkhead pattern (from "Release It!" by
+ * Michael Nygard). Like a ship bulkhead that limits flooding, it bounds the
+ * concurrency admitted through one App policy boundary.
  *
  * Features:
  * - Configurable max concurrent requests per bulkhead
@@ -17,7 +16,7 @@
  *
  * Example:
  * ---
- * // Create isolated bulkheads for different endpoint groups
+ * // Bound concurrency for this application.
  * auto apiBulkhead = createBulkheadMiddleware(BulkheadConfig(
  *     100,  // maxConcurrent
  *     50,   // maxQueue
@@ -25,16 +24,10 @@
  *     "api"
  * ));
  *
- * auto adminBulkhead = createBulkheadMiddleware(BulkheadConfig(
- *     10,   // maxConcurrent (admin is low-volume)
- *     5,    // maxQueue
- *     2.seconds,
- *     "admin"
- * ));
+ * app.use(apiBulkhead.middleware);
  *
- * // Apply to route groups
- * app.group("/api", r => r.use(apiBulkhead.middleware));
- * app.group("/admin", r => r.use(adminBulkhead.middleware));
+ * // Distinct pools require distinct explicit App/listener boundaries. Aurora
+ * // does not currently provide implicit route-group middleware inheritance.
  *
  * // Monitor stats
  * auto stats = apiBulkhead.getStats();

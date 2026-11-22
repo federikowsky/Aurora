@@ -25,7 +25,7 @@ import vibe.core.log : logInfo, logWarn, logError, logDebug;
 
 // Aurora modules
 import aurora.http : HTTPRequest, HTTPResponse;
-import aurora.web.router : Router, Match, PathParams;
+import aurora.web.router : Router, Match, PathParams, Handler;
 import aurora.web.context : Context;
 import aurora.web.middleware : MiddlewarePipeline;
 import aurora.http.util : getStatusText, getStatusLine, buildResponseInto;
@@ -2113,26 +2113,20 @@ final class Server
                 cast(string)request.pathRaw()
             );
             
+            Handler target = &handleNotFound;
             if (result.found && result.handler !is null)
             {
                 ctx.params = result.params;
-                
-                // Execute with middleware pipeline if available
-                if (pipeline !is null && pipeline.length > 0)
-                {
-                    pipeline.execute(ctx, result.handler);
-                }
-                else
-                {
-                    result.handler(ctx);
-                }
+                target = result.handler;
             }
+
+            // App middleware is global: it wraps the selected route or the
+            // framework fallback. Matching happens first so route parameters
+            // remain available to policy code.
+            if (pipeline !is null && pipeline.length > 0)
+                pipeline.execute(ctx, target);
             else
-            {
-                response.setStatus(404);
-                response.setHeader("Content-Type", "application/json");
-                response.setBody(`{"error":"Not Found"}`);
-            }
+                target(ctx);
             
             // Check if connection was hijacked
             if (ctx.isHijacked())
@@ -2188,6 +2182,13 @@ final class Server
                 ), false);
             }
         }
+    }
+
+    private void handleNotFound(ref Context ctx)
+    {
+        ctx.status(404);
+        ctx.header("Content-Type", "application/json");
+        ctx.send(`{"error":"Not Found"}`);
     }
 
     private static bool isHeadMethod(const(char)[] method) @nogc nothrow pure

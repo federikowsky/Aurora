@@ -16,7 +16,6 @@ import aurora.web.router;
 import aurora.web.context;
 import aurora.web.decorators;
 import aurora.web.router_mixin;
-import aurora.web.middleware : NextFunction;
 
 // ========================================
 // HAPPY PATH - ROUTER CLASS
@@ -165,26 +164,13 @@ unittest
     postMatch.handler.shouldEqual(&postHandler);
 }
 
-// Test 10: Router middleware
-@("router middleware")
+// Router-local middleware used to be a stored but inert API. Keep the
+// removal executable so it cannot silently reappear without a dispatch contract.
+@("Router does not expose inert local middleware")
 unittest
 {
-    auto router = new Router();
-    
-    bool middlewareCalled = false;
-    
-    void middleware(ref Context ctx, NextFunction next) {
-        middlewareCalled = true;
-        next();
-    }
-    
-    void handler(ref Context ctx) { }
-    
-    router.use(&middleware);
-    router.get("/test", &handler);
-    
-    // Middleware should be stored
-    router.middlewares.length.shouldEqual(1);
+    static assert(!__traits(hasMember, Router, "use"));
+    static assert(!__traits(hasMember, Router, "middlewares"));
 }
 
 // ========================================
@@ -346,36 +332,6 @@ unittest
     
     app.match("GET", "/users").found.shouldBeTrue;
     app.match("GET", "/posts").found.shouldBeTrue;
-}
-
-// Test 20: Full request flow
-@("full request flow")
-unittest
-{
-    auto router = new Router("/api");
-    
-    int requestCount = 0;
-    
-    void middleware(ref Context ctx, NextFunction next) {
-        requestCount++;
-        next();
-    }
-    
-    void handler(ref Context ctx) {
-        requestCount++;
-    }
-    
-    router.use(&middleware);
-    router.get("/test", &handler);
-    
-    auto match = router.match("GET", "/api/test");
-    
-    // Execute middleware + handler
-    Context ctx;
-    
-    // Note: This test shows the pattern, actual execution
-    // would be done by MiddlewarePipeline
-    requestCount.shouldEqual(0);  // Not executed yet
 }
 
 // ========================================
