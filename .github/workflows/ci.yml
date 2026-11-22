@@ -154,6 +154,14 @@ jobs:
             python3 tests/integration/http_simple_handler_probe.py ./tests/integration/aurora_simple_handler_probe_server 2>&1 | tee "artifacts/ci/simple-handler-$build.log"
           done
 
+      - name: Check global middleware semantics in debug and release
+        run: |
+          set -o pipefail
+          for build in debug release; do
+            dub build tests/integration/middleware_probe_server.d --single --compiler=ldc2 --build="$build" 2>&1 | tee "artifacts/ci/middleware-$build-build.log"
+            python3 tests/integration/http_middleware_probe.py ./tests/integration/aurora_middleware_probe_server 2>&1 | tee "artifacts/ci/middleware-$build.log"
+          done
+
       - name: Build documented minimal example
         run: |
           set -o pipefail

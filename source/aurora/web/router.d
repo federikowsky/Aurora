@@ -178,12 +178,11 @@ alias Handler = void delegate(ref Context);
  * Router - Radix tree router
  *
  * O(K) path matching where K = path length
- * Enhanced with prefix, middleware, and composition support
+ * Enhanced with prefix and composition support
  */
 class Router
 {
     string prefix;                           // Route prefix (e.g., "/api")
-    Middleware[] middlewares;                // Router-local middleware
     Router[] subRouters;                     // Child routers
     
     private RadixNode*[string] methodTrees;  // Separate tree per HTTP method
@@ -314,14 +313,6 @@ class Router
                 }
             }
         }}
-    }
-    
-    /**
-     * Add middleware to router
-     */
-    void use(Middleware mw)
-    {
-        middlewares ~= mw;
     }
     
     /**
@@ -660,8 +651,3 @@ class Router
         }
     }
 }
-
-/**
- * Middleware - Import from middleware module
- */
-import aurora.web.middleware : Middleware, NextFunction;

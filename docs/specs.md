@@ -7,7 +7,7 @@ Descriptive, not a future specification. Reconciled on 25 October 2026 after sel
 1. [App](../source/aurora/app.d) collects routes, a global middleware pipeline, configuration, hooks and exception handlers. `listen()` constructs/configures `Server` and enters its runtime.
 2. [Server](../source/aurora/runtime/server.d) uses vibe-core networking and tasks; [WorkerPool](../source/aurora/runtime/worker.d) manages the multi-listener worker path. Linux/FreeBSD code uses SO_REUSEPORT. Other paths exist but are not a tested support promise.
 3. Aurora retains a receive buffer, incrementally frames a complete HTTP message, checks framing/size boundaries and passes it to [Wire via HTTPRequest](../source/aurora/http/package.d). Residual pipelined bytes are retained. Framing and field parsing are distinct current responsibilities; duplication cost has not justified replacing either.
-4. [Router](../source/aurora/web/router.d) matches method/path and extracts parameters. `handleWithRouter` creates a per-request `Context` and `HTTPResponse`, invokes hooks and, only after a successful match, the global pipeline and handler.
+4. [Router](../source/aurora/web/router.d) matches method/path and extracts parameters. `handleWithRouter` creates a per-request `Context` and `HTTPResponse`, invokes request hooks, matches once, then runs the global App pipeline around either the selected handler or the 404 fallback. Parameters are available to middleware for matched routes.
 5. [Context](../source/aurora/web/context.d) exposes borrowed request/response pointers, parameters, small storage and response/upgrade helpers. Domain work remains in the handler. JSON decoding, validation and serialization are explicit calls today, not an automatic typed-input pipeline.
 6. `HTTPResponse` accumulates application output and is the authoritative buffered response representation. The runtime serializes it directly, preserving application fields while deriving framing and body suppression from status, request method and connection lifecycle.
 7. The writer applies write deadlines; connection code decides keep-alive/retirement, compacts remaining input and cleans up. An admitted request holds its Server-wide reservation through dispatch and writing, releasing at iteration exit. Hijack has a separate ownership defect described in the state register.
@@ -16,7 +16,7 @@ Descriptive, not a future specification. Reconciled on 25 October 2026 after sel
 
 | Owner | Actual responsibility / boundary | Cost or unresolved contract |
 |---|---|---|
-| Aurora App/Router | Registration, selection, parameters, global middleware orchestration | Runtime trie child search; local router middleware is stored but not dispatched |
+| Aurora App/Router | Registration, selection, parameters, one global middleware scope | Runtime trie child search; route-local policy inheritance is deliberately absent |
 | Aurora Server/WorkerPool | Connection lifecycle, message framing, dispatch, deadlines, admission, worker coordination | Server-wide request reservation; duplicated metrics/state and broader shutdown remain open |
 | Wire | Native HTTP field parser and D request wrapper | Live wrappers own independent parsers; field views still borrow the caller's input buffer |
 | Aurora HTTP/Context | Request conveniences, authoritative buffered response representation, per-request application access | Convenience accessors can copy/allocate; repeated response fields are not representable |

@@ -8,7 +8,6 @@
  * - Concurrent request handling
  * - Hello world throughput
  * - Latency P99
- * - Router-local middleware
  * - Multiple sub-routers
  */
 module tests.integration.performance_test;
@@ -323,29 +322,6 @@ unittest
     match.handler(ctx);
     
     res.getStatus().shouldEqual(200);
-}
-
-// Test 9: Router-local middleware
-@("PERF: Router-local middleware executes")
-unittest
-{
-    auto router = new Router("/api");
-    
-    int middlewareCount = 0;
-    
-    router.use((ref Context ctx, NextFunction next) {
-        middlewareCount++;
-        next();
-    });
-    
-    router.get("/test", (ref Context ctx) {
-        ctx.status(200);
-        ctx.send("OK");
-    });
-    
-    // Note: This test shows the pattern
-    // Actual execution would require MiddlewarePipeline integration
-    router.middlewares.length.shouldEqual(1);
 }
 
 // Test 10: Multiple sub-routers
