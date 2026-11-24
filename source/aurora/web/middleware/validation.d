@@ -12,7 +12,7 @@
  */
 module aurora.web.middleware.validation;
 
-import aurora.web.middleware;
+import aurora.web.middleware.chain : NextFunction, Middleware;
 import aurora.web.context;
 import aurora.http;
 import std.json : JSONValue, JSONType, parseJSON, JSONException;
@@ -30,7 +30,7 @@ class ValidationMiddleware(Schema)
     /**
      * Handle request (middleware interface)
      */
-    void handle(Context ctx, NextFunction next)
+    void handle(Context ctx, scope NextFunction next)
     {
         try
         {
@@ -224,7 +224,7 @@ Middleware validateRequest(Schema)()
 {
     auto validator = new ValidationMiddleware!Schema();
     
-    return (ref Context ctx, NextFunction next) {
+    return (ref Context ctx, scope NextFunction next) {
         validator.handle(ctx, next);
     };
 }

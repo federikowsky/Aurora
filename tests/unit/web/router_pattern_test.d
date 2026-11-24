@@ -187,22 +187,6 @@ unittest
     match.found.shouldBeFalse;
 }
 
-// Test 12: Conflicting routes
-@("conflicting routes override")
-unittest
-{
-    auto router = new Router();
-    
-    void handler1(ref Context ctx) { }
-    void handler2(ref Context ctx) { }
-    
-    router.get("/users", &handler1);
-    router.get("/users", &handler2);  // Override
-    
-    auto match = router.match("GET", "/users");
-    match.handler.shouldEqual(&handler2);
-}
-
 // Test 13: Invalid prefix handled
 @("invalid prefix normalized")
 unittest
@@ -430,4 +414,56 @@ unittest
     router.match("PUT", "/api/resource/123").found.shouldBeTrue;
     router.match("DELETE", "/api/resource/123").found.shouldBeTrue;
     router.match("PATCH", "/api/resource/123").found.shouldBeTrue;
+}
+
+@("policies and mounted leaves are configuration snapshots")
+unittest
+{
+    import aurora.web.middleware : Middleware, NextFunction, withMiddleware;
+    string trace;
+    Middleware mark(string tag) {
+        return (ref Context c, scope NextFunction next) { trace ~= tag; next(); };
+    }
+    void leaf(ref Context c) { trace ~= "!"; }
+    auto endpoint = withMiddleware(&leaf);
+    endpoint.shouldEqual(&leaf);
+    Middleware[] input = [mark("g")];
+    auto source = new Router("/v1", input);
+    auto target = withMiddleware(&leaf, input);
+    input[0] = mark("wrong");
+    source.get("item/:id", target);
+    auto destination = new Router("/api", mark("p"));
+    destination.mount("/blue", source);
+    destination.mount("/green", source);
+    source.get("/late", &leaf);
+    Context ctx;
+    foreach (path; ["/api/blue/v1/item/2", "/api/green/v1/item/1"]) {
+        auto m = destination.match("GET", path);
+        m.found.shouldBeTrue;
+        m.handler(ctx);
+    }
+    trace.shouldEqual("pgg!pgg!"); // Two explicit registrations of g, not deduplicated.
+    source.prefix.shouldEqual("/v1");
+    destination.match("GET", "/api/blue/v1/late").found.shouldBeFalse;
+    source.match("GET", "/v1/late").found.shouldBeTrue;
+    withMiddleware(null, mark("x")).shouldThrow!Exception;
+    withMiddleware(&leaf, cast(Middleware)null).shouldThrow!Exception;
+    (new Router("/invalid", cast(Middleware)null)).shouldThrow!Exception;
+}
+
+@("a conflicting mount is rejected before any destination leaf changes")
+unittest
+{
+    auto dest = new Router("/api");
+    auto group = new Router();
+    void original(ref Context c) {}
+    void added(ref Context c) {}
+    dest.get("/users/:id", &original);
+    group.get("/new", &added);
+    group.get("/users/:name", &added);
+    dest.includeRouter(group).shouldThrow!Exception;
+    dest.match("GET", "/api/new").found.shouldBeFalse;
+    dest.match("GET", "/api/users/42").handler.shouldEqual(&original);
+    dest.includeRouter(dest).shouldThrow!Exception;
+    dest.includeRouter(null).shouldThrow!Exception;
 }

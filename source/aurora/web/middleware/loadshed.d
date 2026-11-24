@@ -36,8 +36,7 @@ import aurora.web.context;
 import aurora.runtime.server : Server;
 
 // Import middleware types without causing circular dependency
-alias NextFunction = void delegate();
-alias Middleware = void delegate(ref Context ctx, NextFunction next);
+public import aurora.web.middleware.chain : Middleware, NextFunction;
 
 /**
  * Load Shedding Configuration
@@ -150,7 +149,7 @@ class LoadSheddingMiddleware
     /**
      * Handle request (middleware interface)
      */
-    void handle(ref Context ctx, NextFunction next)
+    void handle(ref Context ctx, scope NextFunction next)
     {
         if (ctx.request is null)
         {

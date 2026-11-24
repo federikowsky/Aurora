@@ -1,36 +1,37 @@
 # Engineering state and North Star scorecard
 
-**Current assessment: 22 November 2026. Production readiness: HOLD.** This is Aurora's sole current scorecard and decision register. It records current evidence and open hypotheses; it is not a task sequence. [NORTH_STAR](NORTH_STAR.md) and [AGENTS](../AGENTS.md) govern direction and work. [specs](specs.md), [API](API.md) and [TEST_REGISTRY](TEST_REGISTRY.md) own observed architecture, public contracts and test selection. Code, selected dependency revisions and pinned executions win when prose diverges.
+**Current assessment: 24 November 2026. Production readiness: HOLD.** This is Aurora's sole current scorecard and decision register. It records current evidence and open hypotheses; it is not a task sequence. [NORTH_STAR](NORTH_STAR.md) and [AGENTS](../AGENTS.md) govern direction and work. [specs](specs.md), [API](API.md) and [TEST_REGISTRY](TEST_REGISTRY.md) own observed architecture, public contracts and test selection. Code, selected dependency revisions and pinned executions win when prose diverges.
 
 MEASURED = direct execution or artifact; OBSERVED = inspected code, diff or log; INFERRED = reasoned consequence; UNVERIFIED = insufficient evidence. Historical evidence is not a current instruction.
 
 ## Revisions and reporting boundary
 
-GitHub metadata was reacquired on 22 November. The actual default branch of all four first-party repositories remains `main`.
+GitHub metadata was reacquired on 24 November. The actual default branch of all four first-party repositories remains `main`.
 
 | Repository | Current implementation / selected revision | Boundary |
 |---|---|---|
-| Aurora | [`8d7d849208954857b273b5f67934529d19e1ea56`](https://github.com/federikowsky/Aurora/commit/8d7d849208954857b273b5f67934529d19e1ea56) | One explicit App middleware boundary; inert Router-local surface removed |
+| Aurora | [`365472d3c2956ff2df72cbcf4f3853f8464422d5`](https://github.com/federikowsky/Aurora/commit/365472d3c2956ff2df72cbcf4f3853f8464422d5) | Revision assessed in the scoped-policy change; tree `022416002624b1f81731d0d54d9bcdb31de5634a`; prior default `fe181eaf` |
 | Wire | [`6c5965eb71dbe81a9abc74832bf7a8020835ae5b`](https://github.com/federikowsky/Wire/commit/6c5965eb71dbe81a9abc74832bf7a8020835ae5b) | Exact revision selected by Aurora; no interval change |
 | FastjsonD | [`23a51d692103a0b77cba153afa2994df0c14f4d3`](https://github.com/federikowsky/Fastjsond/commit/23a51d692103a0b77cba153afa2994df0c14f4d3) | Exact revision selected by Aurora; no interval change |
 | Aurora-WebSocket | [`dacf2f10b0a999d1b373b0b1a16f4c1cd9767bb2`](https://github.com/federikowsky/Aurora-WebSocket/commit/dacf2f10b0a999d1b373b0b1a16f4c1cd9767bb2) | Exact revision selected by Aurora; terminal transport owner unchanged |
 
-The complete implementation interval is **2026-11-15T07:11:20Z–2026-11-22T06:39:44Z**, from scorecard baseline `c23a47f35828ecb5467aeb00d3cf78a89c65cf9a` through implementation merge `8d7d849208954857b273b5f67934529d19e1ea56`. No first-party repository had an external code commit or materially changed issue/PR in the interval before this cycle's work. This scorecard publication is recorded separately and does not move the implementation cutoff past an incomplete run.
+The last complete ecosystem interval is **2026-11-15T07:11:20Z–2026-11-22T06:39:44Z**, through PR #17 (`8d7d8492`). The 24 November assessment is a **focused middleware review**, based on default `fe181eaf`, not a new complete weekly cutoff. Dependencies and server dispatch are unchanged by this review.
 
 ## What changed and why
 
-`Router.use` and `Router.middlewares` advertised a local policy boundary but only stored delegates; App dispatch never read them. The working App pipeline also began only after a successful route match, so authentication, CORS, request IDs or other policy registered globally disappeared on 404 and unmatched `OPTIONS` paths.
+PR #17 was right to remove inert `Router.use`/public storage and run the global pipeline on the framework 404 and unmatched OPTIONS. Its global-only limitation was provisional. The old example kept a public-path exception list inside authentication; method-specific rules on the same path and nested separately authored endpoint sets make that a poor ownership boundary. A per-handler decorator alone does not cover routes added by another module.
 
-Aurora now selects a handler once, exposes matched parameters, and executes one App pipeline around either that handler or the framework 404 fallback. Middleware can short-circuit; post-`next()` work unwinds in reverse order; uncaught exceptions leave the chain for the existing typed exception boundary. Parser/framing failures and admission rejections remain explicitly before this boundary. The inert Router API and two tests that merely proved storage were removed. A real socket gate covers match, miss, preflight, short-circuit, parameters, included subrouter, ordering and typed exception behavior in debug and release.
+The same middleware executor now serves `App.use`, `new Router(prefix, policies...)` and `withMiddleware(handler, policies...)`. The router binds policy to each effective handler at setup. No policy list in a match, group lookup per request or retained subrouter graph. Misses run only App policy; a registered OPTIONS route can run local policy. Imports snapshot child routes and reject conflicts before adding anything. Prefixes are read-only; a second call to the same borrowed continuation throws. See [contract, migration and caveats](API.md#middleware-and-policies).
 
-This is intentionally source-breaking: application-wide `Router.use` registrations migrate to `App.use`; Aurora still provides no implicit route/group/subrouter inheritance. Adding inheritance chains, inclusion-order state and per-route policy composition would have increased machinery before a narrower user need was demonstrated. One stale bulkhead example was found during final drift review and corrected to the actual application boundary.
+**MEASURED:** under LDC 1.42.0 on Linux x86-64, release, eight rotated blocks, the isolated three-policy chain fell from 288 to 0 thread D-GC B/op; parsing, matching and actually executing global+group+route with checked headers/body used 640 vs 352 B/op. Manual wrapping on the new executor also used 352; the saving must not be attributed to the group API alone. The bare fixture was 0 B/op on both sides. Configuring the fixture with 128 additional leaves used 111,712 vs 53,152 D-GC bytes after replacing temporary split arrays with Phobos' lazy segment iterator. The real loopback mix had 30,720 correct measured responses, no timeouts and broad identical-baseline dispersion; throughput/tail equivalence remains **UNVERIFIED**. Native heap, total process allocations, high-depth stack and saturated many-worker behavior are unmeasured. [Raw per-run rows](../benchmarks/evidence/2026-11-24-policy.csv) and [reproduction](../benchmarks/README.md#endpoint-policy-cost).
 
-No dependency, queue, hook, route engine, subsystem or common-path representation was added. The change replaces a misleading surface with one implemented semantic boundary.
+As a stronger manual control the application also assembled each effective policy list once and shared it across corresponding endpoints, on the **old and new** executors. Old flat manual → new declarative used 192 → 0 D-GC B/op for three isolated policies, 592 → 352 for the actual global/group/route fixture, and 101,360 → 53,152 bytes per setup. New flat manual and new declarative both used 352 B/op on the protected fixture and respectively 53,216 / 53,152 bytes at setup. Consequently the new group syntax earns its place through coverage and ownership, not an inherent speed advantage over a well-composed manual handler. [Control patch](../benchmarks/evidence/2026-11-24-flat-control.diff), [all component observations](../benchmarks/evidence/2026-11-24-flat-control.csv). Apply the patch to the same benchmark source in both worktrees and pass the resulting `aurora_policy_flat` binaries to the same driver.
 
 ## Evidence ledger
 
 | Evidence | Pinned scope | Result |
 |---|---|---|
+| Scoped-policy focused validation | code `365472d3` (same tree as local `00461ff6`); baseline `fe181eaf` | **MEASURED:** 18 real socket cases × debug/release × one/two workers, 47 unittest modules, and 8-block manual/manual/bound controls; [benchmark data](../benchmarks/evidence/2026-11-24-policy.csv). Baseline positive mount relocation and static-prefix/parameter selection probes both failed before the fix. |
 | Repository interval | Four default branches and selected revisions | **OBSERVED:** no external code change or materially changed issue/PR before this cycle; dependency pins remain exact |
 | Middleware baseline reproduction | Aurora `c23a47f3` plus fixture only | **MEASURED, red:** first unmatched `GET /missing` returns 404 without `X-Global-Policy`; build succeeds and probe exits 1 |
 | Middleware candidate | local `e424b4651107c0a3f0e397f9394527c1c8f27b8c`, public head `88058506dbeee0e5ade0da47d130867dd008bacd`, identical tree `b5661fabf0768e9dd9510167067c1800433ac0df` | **MEASURED:** seven socket cases pass in debug and release; fake Router storage tests are replaced by an executable absence contract |
@@ -52,7 +53,7 @@ Earlier response, parser-lifetime, admission, logger, WebSocket and low-level-ha
 | B2 request lifetime / Wire | **MEASURED:** independent live parser leases and Aurora consumer coverage | Field views borrow input; cold/overlap native cost remains workload-dependent |
 | B3 buffered response / Aurora | **MEASURED:** headers, framing, injection, HEAD and no-body statuses pass end to end | Repeated same-name fields and broader compression/upgrade interaction |
 | B4 admission / Aurora | **MEASURED:** Server-wide active-request cap covers dispatch and response write in tested one/two-worker cases | Sustained open-loop overload, fairness and stable dedicated-runner cost **UNVERIFIED** |
-| B5 middleware/router / Aurora | **MEASURED:** one App policy chain wraps match, 404 and unmatched `OPTIONS`; order, short-circuit, parameters, subrouter and exception boundary pass over TCP | Parser/admission remain outside by contract; narrower local policy requires explicit handler composition |
+| B5 middleware/router / Aurora | **MEASURED:** one App policy boundary on match/miss; constructor and handler composition select local policies by matched endpoint, including explicit OPTIONS | Parser/admission precede policy; extreme nesting, many-worker contention and namespace-wide miss policy are not covered |
 | B6 upgrade lifecycle / Aurora + Aurora-WebSocket | **MEASURED:** terminal peer Close reaches transport EOF while handler is active | Returning still ends ownership; asynchronous handoff, connection accounting and shutdown remain **UNVERIFIED** |
 | B7 metrics / Aurora | **OBSERVED:** request/error counters are written in Server while Linux getters prefer WorkerState values that those paths do not update | One accounting owner and live one/two-worker assertions for requests, 4xx/errors and timeouts |
 | B8 input/errors / Aurora + FastjsonD | **OBSERVED:** struct conversion failures are silently defaulted; validation uses a separate mapper and can map downstream exceptions to 400 | Explicit input/domain/infrastructure semantics and migration |
@@ -61,32 +62,32 @@ Earlier response, parser-lifetime, admission, logger, WebSocket and low-level-ha
 
 ## Allocation and performance boundaries
 
-The PR functional artifact reports: parser core 0 B/op at 147.067 ns/op; raw method/path 0 B/op at 2.369 ns/op; static router 0 B/op at 24.989 ns/op; inline parameter router 0 B/op at 54.149 ns/op; preallocated response 0 B/op at 19.334 ns/op; response object builder 0 B/op at 40.472 ns/op; response lifecycle 0 B/op at 2.692 ns/op; routed request without I/O 0 B/op at 62.352 ns/op. `method()+path()` is 32 B/op at 66.327 ns/op. These values describe one hosted artifact and are not regression percentages.
+Historical PR #17 functional artifact (not a fresh scoped-policy benchmark) reports: parser core 0 B/op at 147.067 ns/op; raw method/path 0 B/op at 2.369 ns/op; static router 0 B/op at 24.989 ns/op; inline parameter router 0 B/op at 54.149 ns/op; preallocated response 0 B/op at 19.334 ns/op; response object builder 0 B/op at 40.472 ns/op; response lifecycle 0 B/op at 2.692 ns/op; routed request without I/O 0 B/op at 62.352 ns/op. `method()+path()` is 32 B/op at 66.327 ns/op. These values describe one hosted artifact and are not regression percentages.
 
-The PR A/A–A/B run used two workers, two server CPUs, two client CPUs, 100 closed-loop connections, five rotating blocks and three routes. Candidate median throughput was 67,296 requests/s plaintext, 64,375 JSON and 122,326 echo. Median p50/p95/p99/p99.9 latency was respectively 1.450/2.348/6.797/9.253 ms, 1.536/3.001/6.442/15.144 ms and 0.761/2.019/2.880/5.095 ms. Whole-process median CPU was 29.442, 31.139 and 15.970 us/request. Identical-baseline dispersion is wider than any defensible small-delta threshold, so these values describe the artifact and do not prove a regression or improvement.
+The historical PR #17 A/A–A/B run used two workers, two server CPUs, two client CPUs, 100 closed-loop connections, five rotating blocks and three routes. Candidate median throughput was 67,296 requests/s plaintext, 64,375 JSON and 122,326 echo. Median p50/p95/p99/p99.9 latency was respectively 1.450/2.348/6.797/9.253 ms, 1.536/3.001/6.442/15.144 ms and 0.761/2.019/2.880/5.095 ms. Whole-process median CPU was 29.442, 31.139 and 15.970 us/request. Identical-baseline dispersion is wider than any defensible small-delta threshold, so these values describe the artifact and do not prove a regression or improvement.
 
-The D-GC profile excludes initialization, network, logging, exceptions, native allocation, pool misses and overflow. GC was collected and disabled during measurement; zero collections do not prove production pause freedom. No project-wide zero-GC claim is valid.
+That historical D-GC profile excludes initialization, network, logging, exceptions, native allocation, pool misses and overflow. GC was collected and disabled during measurement; zero collections do not prove production pause freedom. No project-wide zero-GC claim is valid.
 
 ## Multidimensional scorecard
 
 | Dimension | Proven / observed | Unknown / deficient |
 |---|---|---|
-| Correctness | **MEASURED:** broad suite; response/admission/parser contracts; terminal WebSocket and low-level response; global policy boundary | Metric ownership, input conversion and asynchronous upgrade ownership |
-| Protocol | **MEASURED:** HTTP 6/6, WebSocket 6/6 per mode, middleware 7/7 per mode | Full RFC/fuzz/Autobahn, repeated headers and broader frame limits **UNVERIFIED** |
+| Correctness | **MEASURED:** broad suite; response/admission/parser contracts; terminal WebSocket and low-level response; global and local endpoint policy boundaries | Metric ownership, input conversion and asynchronous upgrade ownership |
+| Protocol | **MEASURED:** HTTP 6/6, WebSocket 6/6 per mode, focused middleware 18/18 for each worker count and build | Full RFC/fuzz/Autobahn, repeated headers and broader frame limits **UNVERIFIED** |
 | Performance / tail | **MEASURED:** scoped component and network control artifacts retained with dispersion | No stable regression gate, open-loop saturation or controlled-arrival tail baseline |
 | CPU efficiency | **MEASURED, INDICATIVE:** whole-process CPU/request rows exist | Hosted runner noise; cycles/instructions/syscalls/locks absent |
-| Memory / allocations | **MEASURED:** restricted hot paths at 0 D-GC B/op; one 32 B/op convenience path identified | Native bytes, retention, connection-scale RSS and end-to-end allocation |
+| Memory / allocations | **MEASURED:** restricted hot paths at 0 D-GC B/op; executed global+group+route fixture 352 B/op; raw and convenience accessors differ | Native bytes, retention, connection-scale RSS and end-to-end allocation |
 | Scaling | **MEASURED:** admission with one/two configured workers | Many-core efficiency, placement and metric correctness |
-| Resilience / security | **MEASURED:** bounds, conflicting framing, response injection, admission, terminal Close and global policy on misses/preflight | Cancellation/drain/startup failure/sustained overload and narrower policy composition |
+| Resilience / security | **MEASURED:** bounds, conflicting framing, response injection, admission, terminal Close, scoped denial and global policy on misses/preflight | Cancellation/drain/startup failure and sustained overload |
 | Observability | **MEASURED:** logger lifecycle and raw artifacts; **OBSERVED:** duplicated counter ownership | Live public metric correctness, trace contract and off/on overhead |
-| API / DX | **OBSERVED:** one honest global policy surface; explicit advanced writer; common high-level path remains small | Breaking Router migration; input/error model remains fragmented |
-| Documentation | **OBSERVED:** API/spec/test registry match the integrated tree; stale bulkhead example removed | Keep examples and code-derived facts synchronized |
+| API / DX | **OBSERVED:** one middleware type; local policy attached to routes or immutable group membership, with explicit advanced writer | Breaking Router migration; input/error model remains fragmented |
+| Documentation | **OBSERVED:** API/spec/test registry match the integrated tree; compiled middleware example demonstrates public/read/write separation | Keep examples and code-derived facts synchronized |
 | Packaging / release / compatibility | **OBSERVED:** exact first-party pins; **MEASURED:** Linux/LDC consumer | No release tag for accumulated breaking changes; divergent transitive resolution; DMD/OS matrix and migration release needed |
-| Debt / complexity | **OBSERVED:** inert API and fake tests removed; one fallback handler replaces split dispatch | Metrics, input/error and upgrade-handoff responsibilities remain distributed |
+| Debt / complexity | **OBSERVED:** one executor and one matched handler; retained subrouter graph and eager registration segment arrays removed | Metrics, input/error and upgrade-handoff responsibilities remain distributed |
 
 ## Current decision and next discriminator
 
-Production readiness remains **HOLD**. The middleware defect is closed at the actual socket boundary with less public and internal machinery than the baseline. The removal is deliberately breaking because preserving a silent security policy surface would be worse than a small explicit migration. It belongs in a future versioned release together with the other accumulated breaking changes; no tag is justified yet.
+Production readiness remains **HOLD**. Keep PR #17's App/fallback contract, support explicit group and route binding, and reject mutable, retroactive registration. The changed configuration and continuation rules need the [migration](API.md#middleware-and-policies) and an appropriate breaking-version release with the other accumulated changes; this review does not tag a release.
 
 **Dominant current uncertainty:** runtime metric ownership. On Linux/FreeBSD, `Server.getRequests()` and related getters prefer `WorkerPool` aggregation once the pool exists, while request processing increments Server fields. A deployment can therefore serve real traffic while reporting counters from a different, mostly unwritten owner. This affects observability, overload decisions and the credibility of subsequent performance/resilience work.
 

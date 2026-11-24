@@ -51,8 +51,7 @@ import core.atomic : atomicLoad, atomicStore, cas, MemoryOrder;
 import core.sync.mutex : Mutex;
 
 // Import middleware types without causing circular dependency
-alias NextFunction = void delegate();
-alias Middleware = void delegate(ref Context ctx, NextFunction next);
+public import aurora.web.middleware.chain : Middleware, NextFunction;
 
 // ============================================================================
 // CONFIGURATION & TYPES
@@ -226,7 +225,7 @@ class CircuitBreakerMiddleware
      * 3. If OPEN, reject request
      * 4. If CLOSED/HALF_OPEN, execute and evaluate result
      */
-    void handle(ref Context ctx, NextFunction next)
+    void handle(ref Context ctx, scope NextFunction next)
     {
         import core.atomic : atomicOp;
         

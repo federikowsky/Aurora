@@ -12,7 +12,7 @@
  */
 module aurora.web.middleware.requestid;
 
-import aurora.web.middleware;
+import aurora.web.middleware.chain : NextFunction, Middleware;
 import aurora.web.context;
 import std.uuid : randomUUID;
 
@@ -84,7 +84,7 @@ class RequestIdMiddleware
      */
     Middleware middleware()
     {
-        return (ref Context ctx, NextFunction next) {
+        return (ref Context ctx, scope NextFunction next) {
             string requestId;
             
             // Check for existing request ID

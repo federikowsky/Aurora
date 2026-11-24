@@ -12,11 +12,13 @@ Descriptive, not a future specification. Reconciled on 25 October 2026 after sel
 6. `HTTPResponse` accumulates application output and is the authoritative buffered response representation. The runtime serializes it directly, preserving application fields while deriving framing and body suppression from status, request method and connection lifecycle.
 7. The writer applies write deadlines; connection code decides keep-alive/retirement, compacts remaining input and cleans up. An admitted request holds its Server-wide reservation through dispatch and writing, releasing at iteration exit. Hijack has a separate ownership defect described in the state register.
 
+Group inclusion copies the effective method/path leaves once, not a graph of live routers. At configuration, a router binds its own policy outside each incoming handler; a bare router preserves delegate identity. On dispatch a hit already contains the final handler, with no scope lookup or per-request list merge. App and local policies use the same synchronous continuation executor. Configured scopes add wrapper calls and stack frames; stateful middleware and the work it requests can allocate. [Middleware contracts and migration](API.md#middleware-and-policies).
+
 ## Responsibility map
 
 | Owner | Actual responsibility / boundary | Cost or unresolved contract |
 |---|---|---|
-| Aurora App/Router | Registration, selection, parameters, one global middleware scope | Runtime trie child search; route-local policy inheritance is deliberately absent |
+| Aurora App/Router | Registration, selection, parameters, one App boundary and registration-time binding of group/leaf policies | Runtime trie child search; each matched leaf still contains a single handler |
 | Aurora Server/WorkerPool | Connection lifecycle, message framing, dispatch, deadlines, admission, worker coordination | Server-wide request reservation; duplicated metrics/state and broader shutdown remain open |
 | Wire | Native HTTP field parser and D request wrapper | Live wrappers own independent parsers; field views still borrow the caller's input buffer |
 | Aurora HTTP/Context | Request conveniences, authoritative buffered response representation, per-request application access | Convenience accessors can copy/allocate; repeated response fields are not representable |

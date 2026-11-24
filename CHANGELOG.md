@@ -1,8 +1,10 @@
 # Change history
 
-## Unreleased — updated 22 November 2026
+## Unreleased — updated 24 November 2026
 
-- Make `App.use` middleware wrap every request admitted to App dispatch, including the 404 fallback and unmatched `OPTIONS`, while preserving matched route parameters and deterministic `next()` order. Parser/framing failures and admission rejections remain outside this boundary. Remove the inert `Router.use` / `Router.middlewares` surface; migrate application-wide registrations to `App.use`. Route/group inheritance remains intentionally absent rather than silently ineffective. Add debug/release socket coverage for match, miss, preflight, short-circuit, subrouter and exception behavior.
+- Bind group policy with `new Router(prefix, policies...)` and a single endpoint with `withMiddleware(handler, policies...)`. No extra match or hierarchy walk during requests. Keep App middleware on fallback/OPTIONS. Mount snapshots the child's effective routes without changing its prefix, and an incomplete static branch permits a parameter match. **Breaking configuration/continuation changes:** duplicate routes and conflicting capture names now throw at setup; router prefixes are read-only, the exposed child graph is removed, and `next` is synchronous, scoped and single-use. [Migration and ordering](docs/API.md#middleware-and-policies).
+
+- Make `App.use` middleware wrap every request admitted to App dispatch, including the 404 fallback and unmatched `OPTIONS`, while preserving matched route parameters and deterministic `next()` order. Parser/framing failures and admission rejections remain outside this boundary. Remove the inert `Router.use` / `Router.middlewares` surface; migrate application-wide registrations to `App.use`. Add debug/release socket coverage for match, miss, preflight, short-circuit, subrouter and exception behavior.
 
 - Validate WebSocket upgrades against the real HTTP method and version, and pin Aurora-WebSocket's 16-byte opening key validation. Non-GET, HTTP/1.0 and malformed keys no longer get a 101 response. The synchronous socket test runs in debug and release.
 - Make `HTTPResponse` the authoritative buffered response contract. Preserve application fields end to end, derive framing from final state, enforce HEAD/1xx/204/205/304 body rules and reject response-splitting field syntax.

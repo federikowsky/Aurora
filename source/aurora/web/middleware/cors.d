@@ -11,7 +11,7 @@
  */
 module aurora.web.middleware.cors;
 
-import aurora.web.middleware;
+import aurora.web.middleware.chain : NextFunction, Middleware;
 import aurora.web.context;
 import aurora.http;
 
@@ -46,7 +46,7 @@ class CORSMiddleware
     /**
      * Handle request (middleware interface)
      */
-    void handle(Context ctx, NextFunction next)
+    void handle(Context ctx, scope NextFunction next)
     {
         // Get origin from request
         string requestOrigin = ctx.request && ctx.request.hasHeader("Origin")
@@ -181,7 +181,7 @@ Middleware corsMiddleware(CORSConfig config = CORSConfig())
 {
     auto cors = new CORSMiddleware(config);
     
-    return (ref Context ctx, NextFunction next) {
+    return (ref Context ctx, scope NextFunction next) {
         cors.handle(ctx, next);
     };
 }

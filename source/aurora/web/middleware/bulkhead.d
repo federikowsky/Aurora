@@ -24,10 +24,10 @@
  *     "api"
  * ));
  *
- * app.use(apiBulkhead.middleware);
+ * auto api = new Router("/api", apiBulkhead.middleware);
  *
- * // Distinct pools require distinct explicit App/listener boundaries. Aurora
- * // does not currently provide implicit route-group middleware inheritance.
+ * // Register the protected endpoints on api, then app.includeRouter(api).
+ * // Reuse this instance to share its pool; construct another for an independent pool.
  *
  * // Monitor stats
  * auto stats = apiBulkhead.getStats();
@@ -51,8 +51,7 @@ import core.sync.mutex : Mutex;
 import core.sync.condition : Condition;
 
 // Import middleware types
-alias NextFunction = void delegate();
-alias Middleware = void delegate(ref Context ctx, NextFunction next);
+public import aurora.web.middleware.chain : Middleware, NextFunction;
 
 // ============================================================================
 // CONFIGURATION & TYPES
@@ -230,7 +229,7 @@ class BulkheadMiddleware
      * 2. If queue capacity available: wait with timeout
      * 3. If both full: reject with 503
      */
-    void handle(ref Context ctx, NextFunction next) @trusted
+    void handle(ref Context ctx, scope NextFunction next) @trusted
     {
         // Try to acquire a slot
         auto result = acquire();

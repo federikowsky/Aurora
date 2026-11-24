@@ -18,12 +18,14 @@ final class ProbeError : Exception
     this() { super("probe failure"); }
 }
 
+private final class Trace { string value = "G"; }
+
 void main(string[] args)
 {
     auto config = ServerConfig.defaults();
     config.host = "127.0.0.1";
     config.port = to!ushort(args[1]);
-    config.numWorkers = 1;
+    config.numWorkers = args.length > 3 ? to!uint(args[3]) : 1;
     config.maxConnections = 0;
     config.maxInFlightRequests = 0;
     config.readTimeout = 3.seconds;
@@ -44,7 +46,7 @@ void main(string[] args)
 
         auto method = cast(string) ctx.request.methodRaw();
         auto path = cast(string) ctx.request.pathRaw();
-        if (method == "OPTIONS")
+        if (method == "OPTIONS" && ctx.request.hasHeader("Origin"))
         {
             ctx.status(204).header("X-Preflight-Policy", "handled");
         }
@@ -59,6 +61,46 @@ void main(string[] args)
 
         ctx.storage.set("order", ctx.storage.get!int("order") + 1);
     });
+
+    // A cheap observable trace from each scope, independent of URI or verb.
+    WebMiddleware.Middleware mark(string name) {
+        return (ref Context ctx, scope WebMiddleware.NextFunction next) {
+            ctx.storage.get!Trace("trace").value ~= name;
+            next();
+            ctx.storage.get!Trace("trace").value ~= "/" ~ name;
+        };
+    }
+    app.use((ref Context ctx, scope WebMiddleware.NextFunction next) {
+        ctx.storage.set("trace", new Trace);
+        scope(exit) ctx.header("X-Scopes", ctx.storage.get!Trace("trace").value);
+        next();
+    });
+    auto area = new Router("/api", mark("A"));
+    WebMiddleware.Middleware requireRole = (ref Context ctx, scope WebMiddleware.NextFunction next) {
+        if (ctx.request.getHeader("X-Probe-Role") != "admin") {
+            ctx.storage.get!Trace("trace").value ~= "D";
+            ctx.status(403).send("role required");
+            return;
+        }
+        next();
+    };
+    auto admin = new Router("/admin", requireRole, mark("B"));
+    void endpoint(ref Context ctx) {
+        ctx.storage.get!Trace("trace").value ~= "H";
+        ctx.send("item:" ~ ctx.params["id"]);
+    }
+    WebMiddleware.Middleware inspectId = (ref Context ctx, scope WebMiddleware.NextFunction next) {
+        ctx.header("X-Local-Id", ctx.params["id"]);
+        next();
+    };
+    admin.get("/items/:id", WebMiddleware.withMiddleware(&endpoint, mark("R"), inspectId));
+    admin.post("/items/:id", &endpoint);
+    admin.get("/items/fixed/detail", (ref Context ctx) { ctx.send("fixed detail"); });
+    admin.addRoute("OPTIONS", "/admin/items/:id", &endpoint);
+    admin.get("/error", WebMiddleware.withMiddleware((ref Context ctx) { throw new ProbeError; }, mark("E")));
+    area.includeRouter(admin);
+    app.includeRouter(area);
+    app.get("/api/public", (ref Context ctx) { ctx.send("public"); });
 
     app.get("/ok", (ref Context ctx) {
         ctx.storage.set("order", ctx.storage.get!int("order") + 1);

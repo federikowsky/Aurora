@@ -154,7 +154,7 @@ jobs:
             python3 tests/integration/http_simple_handler_probe.py ./tests/integration/aurora_simple_handler_probe_server 2>&1 | tee "artifacts/ci/simple-handler-$build.log"
           done
 
-      - name: Check global middleware semantics in debug and release
+      - name: Check application and scoped middleware semantics in debug and release
         run: |
           set -o pipefail
           for build in debug release; do
@@ -162,10 +162,11 @@ jobs:
             python3 tests/integration/http_middleware_probe.py ./tests/integration/aurora_middleware_probe_server 2>&1 | tee "artifacts/ci/middleware-$build.log"
           done
 
-      - name: Build documented minimal example
+      - name: Build documented examples
         run: |
           set -o pipefail
           dub build examples/minimal_server.d --single --compiler=ldc2 2>&1 | tee artifacts/ci/minimal-example.log
+          dub build examples/middleware_example.d --single --compiler=ldc2 2>&1 | tee artifacts/ci/middleware-example.log
 
       - name: Run HTTP protocol integration tests
         run: |
@@ -216,6 +217,12 @@ jobs:
             | tee artifacts/ci/allocation-profile-build.log
           ./benchmarks/aurora_allocation_profile \
             | tee artifacts/ci/allocation-profile.jsonl
+
+      - name: Exercise scoped-policy benchmark workloads
+        run: |
+          set -o pipefail
+          dub build benchmarks/policy_cost.d --single --compiler=ldc2 --build=release 2>&1 | tee artifacts/ci/policy-cost-build.log
+          ./benchmarks/aurora_policy_cost bound 25000 | tee artifacts/ci/policy-cost.csv
 
       - name: Upload evidence
         if: always()
