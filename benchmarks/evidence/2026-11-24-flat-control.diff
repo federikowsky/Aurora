@@ -1,0 +1,69 @@
+--- a/benchmarks/policy_cost.d
++++ b/benchmarks/policy_cost.d
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env dub
+ /+ dub.sdl:
+-    name "aurora_policy_cost"
++    name "aurora_policy_flat"
+     dependency "aurora" path=".."
+ +/
+ /**
+@@ -9,7 +9,7 @@
+  * its manual composition control. Usage: policy_cost manual|bound [iterations].
+  * A separate "setup" row measures 128 endpoints including snapshot registration.
+  */
+-module benchmarks.policy_cost;
++module benchmarks.policy_flat_control;
+
+ import aurora.http : HTTPRequest, HTTPResponse;
+ import aurora.web.context : Context;
+@@ -45,11 +45,16 @@
+ private void endpoint(ref Context c) { c.send("ok"); }
+ private void missing(ref Context c) { c.status(404).send("missing"); }
+
+-private Handler manualWrap(Handler h, mw.Middleware m)
++private Handler manualBind(Handler h, mw.MiddlewarePipeline p)
++{
++    return (ref Context ctx) { p.execute(ctx, h); };
++}
++
++private mw.MiddlewarePipeline flat(mw.Middleware[] policy...)
+ {
+     auto p = new mw.MiddlewarePipeline;
+-    p.use(m);
+-    return (ref Context c) { p.execute(c, h); };
++    foreach (m; policy) p.use(m);
++    return p;
+ }
+
+ private Router fixture(bool bound, string[] extra = null)
+@@ -69,9 +74,13 @@
+         } else throw new Exception("bound mode requires scoped middleware");
+     } else {
+         area = new Router("/items");
+-        area.get("/", manualWrap(h, g));
+-        area.get("/:id", manualWrap(manualWrap(h, r), g));
+-        foreach (path; extra) area.get(path, manualWrap(h, g));
++        // The application manually declares every effective policy set. Reuse
++        // each pipeline across all endpoints with that set.
++        auto group = flat(g);
++        auto groupAndRoute = flat(g, r);
++        area.get("/", manualBind(h, group));
++        area.get("/:id", manualBind(h, groupAndRoute));
++        foreach (path; extra) area.get(path, manualBind(h, group));
+     }
+     root.includeRouter(area);
+     return root;
+@@ -172,7 +181,11 @@
+                 h = mw.withMiddleware(h, policies);
+             }
+         } else {
+-            foreach (_; 0 .. depth) h = manualWrap(h, counter);
++            if (depth) {
++                auto p = new mw.MiddlewarePipeline;
++                foreach (_; 0 .. depth) p.use(counter);
++                h = manualBind(h, p);
++            }
+         }
+         measure("chain" ~ depth.to!string, n, n / 10, (size_t i) {
+             Context c;
