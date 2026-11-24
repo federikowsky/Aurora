@@ -1,6 +1,6 @@
 # Current architecture and ownership
 
-Descriptive, not a future specification. Reconciled on 25 October 2026 after selecting integrated Wire parser leases at `6c5965eb71dbe81a9abc74832bf7a8020835ae5b`. Exact Aurora revisions, candidates and evidence boundaries are in [ENGINEERING_STATUS](ENGINEERING_STATUS.md). Code and selected dependencies at the checkout revision win over this map. Principles belong to [NORTH_STAR](NORTH_STAR.md); public behavior and caveats to [API](API.md).
+Descriptive, not a future specification. Middleware scope and routing were checked on 24–25 November 2026; Wire parser leases remain selected at `6c5965eb71dbe81a9abc74832bf7a8020835ae5b`. Exact Aurora revisions, candidates and evidence boundaries are in [ENGINEERING_STATUS](ENGINEERING_STATUS.md). Code and selected dependencies at the checkout revision win over this map. Principles belong to [NORTH_STAR](NORTH_STAR.md); public behavior and caveats to [API](API.md).
 
 ## Request journey
 
