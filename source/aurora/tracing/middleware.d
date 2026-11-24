@@ -28,8 +28,7 @@ import aurora.web.context : Context;
 import core.time : MonoTime;
 
 // Import middleware types
-alias NextFunction = void delegate();
-alias Middleware = void delegate(ref Context ctx, NextFunction next);
+public import aurora.web.middleware.chain : Middleware, NextFunction;
 
 // ============================================================================
 // TRACING DATA (stored in context)
@@ -168,7 +167,7 @@ class TracingMiddleware
     /**
      * Handle request (middleware interface)
      */
-    void handle(ref Context ctx, NextFunction next)
+    void handle(ref Context ctx, scope NextFunction next)
     {
         if (ctx.request is null)
         {

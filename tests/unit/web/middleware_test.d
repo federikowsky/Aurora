@@ -475,3 +475,40 @@ unittest
     
     executionCount.shouldEqual(1000);
 }
+
+@("next is one-shot across retries, including after a downstream exception")
+unittest
+{
+    import aurora.web.middleware : withMiddleware;
+    int calls;
+    auto leaf = (ref Context ctx) { ++calls; throw new Exception("endpoint"); };
+    Middleware retry = (ref Context ctx, scope NextFunction next) {
+        try { next(); } catch (Exception e) { e.msg.shouldEqual("endpoint"); }
+        next();
+    };
+    auto pipeline = new MiddlewarePipeline;
+    pipeline.use(null).shouldThrow!Exception;
+    Context ctx;
+    auto handler = withMiddleware(leaf, retry);
+    foreach (i; 1 .. 3) {
+        try { handler(ctx); assert(false, "second next should throw"); }
+        catch (Exception e) { e.msg.shouldEqual("Middleware next() called more than once"); }
+        calls.shouldEqual(i);
+    }
+}
+
+@("the class adapter does not erase the continuation lifetime")
+unittest
+{
+    import aurora.app : App;
+    static class Retaining {
+        NextFunction saved;
+        void handle(ref Context ctx, NextFunction next) { saved = next; }
+    }
+    static class Borrowing {
+        void handle(ref Context ctx, scope NextFunction next) { next(); }
+    }
+    App app;
+    static assert(!__traits(compiles, app.use(new Retaining)));
+    static assert(__traits(compiles, app.use(new Borrowing)));
+}

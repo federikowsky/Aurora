@@ -12,7 +12,7 @@
  */
 module aurora.web.middleware.compression;
 
-import aurora.web.middleware;
+import aurora.web.middleware.chain : NextFunction, Middleware;
 import aurora.web.context;
 import aurora.http;
 import std.zlib;
@@ -80,7 +80,7 @@ class CompressionMiddleware
     /**
      * Handle request (middleware interface)
      */
-    void handle(Context ctx, NextFunction next)
+    void handle(Context ctx, scope NextFunction next)
     {
         // Execute next middleware/handler first
         next();
@@ -267,7 +267,7 @@ Middleware compressionMiddleware(CompressionConfig config = CompressionConfig())
 {
     auto compression = new CompressionMiddleware(config);
     
-    return (ref Context ctx, NextFunction next) {
+    return (ref Context ctx, scope NextFunction next) {
         compression.handle(ctx, next);
     };
 }

@@ -15,7 +15,7 @@
 module aurora.web.middleware.memory;
 
 import aurora.web.context : Context;
-import aurora.web.middleware : NextFunction, Middleware;
+import aurora.web.middleware.chain : NextFunction, Middleware;
 import aurora.mem.pressure : MemoryMonitor, MemoryConfig, MemoryState;
 
 /**
@@ -52,7 +52,7 @@ class MemoryMiddleware
     /**
      * Handle request
      */
-    void handle(ref Context ctx, NextFunction next) @trusted
+    void handle(ref Context ctx, scope NextFunction next) @trusted
     {
         if (ctx.request is null)
         {

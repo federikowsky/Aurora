@@ -133,7 +133,12 @@ class App
     /// Add middleware class instance
     App use(T)(T middleware) if (__traits(hasMember, T, "handle"))
     {
-        pipeline.use((ref Context ctx, NextFunction next) {
+        // The adapter must not hand a borrowed stack continuation to an
+        // escaping parameter. Also accept existing by-value Context handlers.
+        static assert(is(typeof(&middleware.handle) : Middleware) ||
+                      is(typeof(&middleware.handle) : void delegate(Context, scope NextFunction)),
+                      "App.use: handle must borrow its continuation (scope NextFunction next)");
+        pipeline.use((ref Context ctx, scope NextFunction next) {
             middleware.handle(ctx, next);
         });
         return this;

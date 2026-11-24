@@ -55,3 +55,14 @@ byte controls, warm-up and shutdown; peak RSS includes all server memory. Neithe
 is a pure steady-state allocation metric. Errors are retained, not accepted as
 useful throughput. Closed-loop latency is not an overload SLO. Compare only the
 recorded compatible configurations, retaining A/A dispersion and adverse results.
+
+## Endpoint policy cost
+
+Use two worktrees and the same LDC/DUB and dependency selections. Copy `benchmarks/policy_cost.d` from the candidate into the baseline's `benchmarks/`. In each worktree run `dub build benchmarks/policy_cost.d --single --compiler=ldc2 --build=release`. Compare the resulting **separate** executables from the candidate, for example on Linux:
+
+```sh
+python3 benchmarks/compare_policy.py /path/base/benchmarks/aurora_policy_cost /path/candidate/benchmarks/aurora_policy_cost results-component --kind component
+python3 benchmarks/compare_policy.py /path/base/benchmarks/aurora_policy_cost /path/candidate/benchmarks/aurora_policy_cost results-tcp --kind tcp
+```
+
+Pin disjoint CPU sets where available (e.g. `taskset -c 2-4 python3 ... --server-cpus 1`). A1/A2 run the same baseline binary and manual registration; M uses the candidate with the same manual registration; B uses group and route binding. The component parses identical input, matches routes, validates status, headers and body. Isolated chain rows use request-local integer storage without networking; setup includes 128 extra routes and import. D-GC bytes are from the measured thread, after warm-up and an explicit collection with automatic GC enabled. TCP uses a single worker and four persistent connections in a closed loop. Every response and graceful process exit is checked. Output contains individual component samples, latency observations, configuration and summary rows. Raw loopback time includes the client; do not turn noisy A/A differences into a throughput claim.

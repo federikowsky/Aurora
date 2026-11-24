@@ -12,6 +12,7 @@
 module aurora.web.router;
 
 import aurora.web.context;
+import aurora.web.middleware.chain : Middleware, bindPolicy, snapshotPolicy;
 import std.functional : toDelegate;
 
 /**
@@ -182,21 +183,19 @@ alias Handler = void delegate(ref Context);
  */
 class Router
 {
-    string prefix;                           // Route prefix (e.g., "/api")
-    Router[] subRouters;                     // Child routers
+    immutable string prefix;
+    private Middleware[] groupPolicy;
     
     private RadixNode*[string] methodTrees;  // Separate tree per HTTP method
     
     /**
      * Constructor with optional prefix
      */
-    this(string prefix = "")
+    this(string prefix = "", Middleware[] policy...)
     {
-        this.prefix = normalizePath(prefix);
-        if (this.prefix == "/")
-        {
-            this.prefix = "";
-        }
+        auto normalized = normalizePath(prefix);
+        this.prefix = normalized == "/" ? "" : normalized;
+        groupPolicy = snapshotPolicy(policy);
     }
     
     /**
@@ -204,63 +203,76 @@ class Router
      */
     void addRoute(string method, string path, Handler handler)
     {
-        // BUG #7 FIX: Validate handler is non-null
         if (handler is null)
-        {
             throw new Exception("Handler cannot be null for route: " ~ method ~ " " ~ path);
-        }
+        registerLeaf(method, path, handler, false);
+    }
 
-        // Normalize path
+    // A preflight walk only checks existing nodes. It never creates a node or
+    // binds a handler. Used to reject conflicting mounts before importing any leaf.
+    private void registerLeaf(string method, string path, Handler handler, bool checkOnly)
+    {
         path = normalizePath(path);
-
-        // Get or create method tree
-        if (method !in methodTrees)
+        auto root = method in methodTrees;
+        if (root is null)
         {
+            if (checkOnly) return;
             methodTrees[method] = new RadixNode();
         }
-        
-        auto root = methodTrees[method];
-        
-        // Split path into segments
-        auto segments = splitPath(path);
-        
-        // Insert into radix tree
-        auto node = root;
-        foreach (segment; segments)
+        auto node = methodTrees[method];
+        if (path == "/")
         {
-            node = insertSegment(node, segment);
+            node = segmentNode(node, path, !checkOnly);
+            if (node is null) return;
         }
-        
-        // Set handler at leaf
-        node.handler = handler;
+        else
+        {
+            import std.algorithm.iteration : splitter;
+            foreach (segment; path.splitter('/'))
+            {
+                if (!segment.length) continue;
+                node = segmentNode(node, segment, !checkOnly);
+                if (node is null) return;
+            }
+        }
+        if (node.handler !is null)
+            throw new Exception("Duplicate route: " ~ method ~ " " ~ path);
+        if (!checkOnly)
+            node.handler = bindPolicy(handler, groupPolicy);
     }
-    
+
+    private string prefixed(string path)
+    {
+        if (!prefix.length) return path;
+        return path.length && path[0] != '/' ? prefix ~ "/" ~ path : prefix ~ path;
+    }
+
     /**
      * HTTP method helpers
      */
     void get(string path, Handler handler)
     {
-        addRoute("GET", prefix ~ path, handler);
+        addRoute("GET", prefixed(path), handler);
     }
     
     void post(string path, Handler handler)
     {
-        addRoute("POST", prefix ~ path, handler);
+        addRoute("POST", prefixed(path), handler);
     }
     
     void put(string path, Handler handler)
     {
-        addRoute("PUT", prefix ~ path, handler);
+        addRoute("PUT", prefixed(path), handler);
     }
     
     void delete_(string path, Handler handler)
     {
-        addRoute("DELETE", prefix ~ path, handler);
+        addRoute("DELETE", prefixed(path), handler);
     }
     
     void patch(string path, Handler handler)
     {
-        addRoute("PATCH", prefix ~ path, handler);
+        addRoute("PATCH", prefixed(path), handler);
     }
     
     /**
@@ -315,66 +327,26 @@ class Router
         }}
     }
     
-    /**
-     * Mount sub-router at a specific prefix
-     * 
-     * Example:
-     *   mainRouter.mount("/api/v1/products", productRouter);
-     */
+    /// Import the child's current effective routes under an additional prefix.
+    /// No child is retained or mutated. Each destination policy is applied once.
     void mount(string mountPrefix, Router other)
     {
-        // Set the sub-router's prefix and include it
-        other.prefix = normalizePath(mountPrefix);
-        includeRouter(other);
+        if (other is null || other is this)
+            throw new Exception("A mount requires a distinct non-null router");
+        auto extra = normalizePath(mountPrefix);
+        auto base = extra == "/" ? prefix : prefix ~ extra;
+        foreach (checkOnly; [true, false])
+            foreach (method, tree; other.methodTrees)
+                if (!checkOnly || method in methodTrees)
+                    importLeaves(method, tree, base, checkOnly);
     }
-    
-    /**
-     * Include sub-router (composition)
-     */
-    void includeRouter(Router other, Router[] visited = [], string accumulatedPrefix = null)
+
+    /// Include a snapshot of the child's routes under this router's prefix.
+    void includeRouter(Router other)
     {
-        // BUG #5 FIX: Cycle detection to prevent infinite recursion
-        foreach (v; visited)
-        {
-            if (v is other)
-            {
-                throw new Exception("Circular router reference detected");
-            }
-        }
-
-        subRouters ~= other;
-
-        // Calculate the prefix to use for this sub-router's routes
-        // First time called: use this router's prefix
-        // Recursive calls: use accumulated prefix from parent chain
-        string effectivePrefix = accumulatedPrefix !is null ? accumulatedPrefix : prefix;
-        
-        // Register all routes from sub-router
-        // Note: Routes in other's trees already include other's prefix
-        // We add the effective prefix from the parent chain
-        foreach (method, tree; other.methodTrees)
-        {
-            registerSubRouterRoutes(method, tree, effectivePrefix);
-        }
-
-        // Calculate accumulated prefix for nested sub-routers
-        // This includes all prefixes in the chain
-        string nextAccumulatedPrefix = effectivePrefix;
-        if (other.prefix.length > 0 && other.prefix != "/")
-        {
-            if (nextAccumulatedPrefix.length > 0 && nextAccumulatedPrefix != "/")
-                nextAccumulatedPrefix ~= other.prefix;
-            else
-                nextAccumulatedPrefix = other.prefix;
-        }
-
-        // Recursively include sub-routers with cycle tracking and accumulated prefix
-        foreach (subRouter; other.subRouters)
-        {
-            includeRouter(subRouter, visited ~ other, nextAccumulatedPrefix);
-        }
+        mount("", other);
     }
-    
+
     /**
      * Match path to route
      */
@@ -441,35 +413,6 @@ class Router
     }
     
     /**
-     * Split path into segments
-     */
-    string[] splitPath(string path)
-    {
-        import std.array : split;
-        import std.algorithm : filter;
-        import std.string : strip;
-        
-        if (path == "/")
-        {
-            return ["/"];
-        }
-        
-        auto segments = path.split("/");
-        
-        // Filter empty segments
-        string[] result;
-        foreach (seg; segments)
-        {
-            if (seg.length > 0)
-            {
-                result ~= seg;
-            }
-        }
-        
-        return result;
-    }
-    
-    /**
      * Detect node type from segment
      */
     NodeType detectType(string segment)
@@ -503,7 +446,7 @@ class Router
     /**
      * Insert segment into radix tree
      */
-    RadixNode* insertSegment(RadixNode* node, string segment)
+    RadixNode* segmentNode(RadixNode* node, string segment, bool create)
     {
         // BUG #2 FIX: Match PARAM/WILDCARD by type, not exact prefix
         auto segmentType = detectType(segment);
@@ -514,12 +457,10 @@ class Router
             // For PARAM/WILDCARD: match by type (only one per parent allowed)
             if (segmentType != NodeType.STATIC && child.type == segmentType)
             {
-                // Warn if param name differs (developer mistake)
                 if (child.paramName != segmentParamName)
                 {
-                    import std.stdio : stderr;
-                    stderr.writefln("Warning: Conflicting param names '%s' vs '%s' on same path segment",
-                                   child.paramName, segmentParamName);
+                    throw new Exception("Conflicting route parameter names: " ~
+                                        child.paramName ~ " and " ~ segmentParamName);
                 }
                 return child;
             }
@@ -530,6 +471,8 @@ class Router
                 return child;
             }
         }
+
+        if (!create) return null;
 
         // Create new node
         auto newNode = new RadixNode();
@@ -559,7 +502,7 @@ class Router
         {
             if (child.type == NodeType.STATIC)
             {
-                if (path == child.prefix)
+                if (path == child.prefix && child.handler !is null)
                 {
                     return child.handler;
                 }
@@ -631,12 +574,12 @@ class Router
     /**
      * Register routes from sub-router
      */
-    private void registerSubRouterRoutes(string method, RadixNode* node, string pathPrefix)
+    private void importLeaves(string method, RadixNode* node, string pathPrefix, bool checkOnly)
     {
         if (node.handler !is null)
         {
             // This node has a handler, register it
-            addRoute(method, pathPrefix, node.handler);
+            registerLeaf(method, pathPrefix, node.handler, checkOnly);
         }
         
         // Recursively register children
@@ -647,7 +590,7 @@ class Router
             {
                 childPath ~= "/" ~ child.prefix;
             }
-            registerSubRouterRoutes(method, child, childPath);
+            importLeaves(method, child, childPath, checkOnly);
         }
     }
 }

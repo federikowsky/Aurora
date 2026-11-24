@@ -12,7 +12,7 @@
  */
 module aurora.web.middleware.logger;
 
-import aurora.web.middleware;
+import aurora.web.middleware.chain : NextFunction, Middleware;
 import aurora.web.context;
 import aurora.http;
 import std.datetime.stopwatch;
@@ -97,7 +97,7 @@ class LoggerMiddleware
     /**
      * Handle request (middleware interface)
      */
-    void handle(Context ctx, NextFunction next)
+    void handle(Context ctx, scope NextFunction next)
     {
         auto sw = StopWatch(AutoStart.yes);
         
@@ -255,7 +255,7 @@ Middleware loggerMiddleware(LoggerMiddleware logger = null)
         logger = new LoggerMiddleware();
     }
     
-    return (ref Context ctx, NextFunction next) {
+    return (ref Context ctx, scope NextFunction next) {
         logger.handle(ctx, next);
     };
 }

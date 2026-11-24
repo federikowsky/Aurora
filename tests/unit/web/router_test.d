@@ -421,22 +421,16 @@ unittest
 // EDGE CASES - DUPLICATE HANDLING
 // ========================================
 
-// Test 25: Duplicate route override
-@("duplicate route overrides handler")
+// Test 25: Duplicate route rejection
+@("duplicate route rejected; original endpoint is retained")
 unittest
 {
     auto router = new Router();
-    
-    void handler1(ref Context ctx) { }
-    void handler2(ref Context ctx) { }
-    
-    router.addRoute("GET", "/users", &handler1);
-    router.addRoute("GET", "/users", &handler2);  // Override
-    
-    auto match = router.match("GET", "/users");
-    
-    match.found.shouldBeTrue;
-    match.handler.shouldEqual(&handler2);
+    void first(ref Context ctx) {}
+    void second(ref Context ctx) {}
+    router.get("/users", &first);
+    router.get("/users", &second).shouldThrow!Exception;
+    router.match("GET", "/users").handler.shouldEqual(&first);
 }
 
 // Test 26: Same path different methods

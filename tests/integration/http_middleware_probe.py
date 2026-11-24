@@ -22,7 +22,7 @@ def wait_for(predicate, message: str) -> None:
 
 
 @contextlib.contextmanager
-def server(binary: str):
+def server(binary: str, workers: int):
     with tempfile.TemporaryDirectory(prefix="aurora-middleware-") as tmp:
         directory = Path(tmp)
         with socket.socket() as sock:
@@ -30,7 +30,7 @@ def server(binary: str):
             port = sock.getsockname()[1]
         with (directory / "server.log").open("wb") as log:
             process = subprocess.Popen(
-                [binary, str(port), tmp], stdout=log, stderr=log
+                [binary, str(port), tmp, str(workers)], stdout=log, stderr=log
             )
             try:
                 def ready() -> bool:
@@ -56,13 +56,13 @@ def server(binary: str):
                 assert (directory / "stopped").exists(), "App.listen() did not return"
 
 
-def request(port: int, method: str, path: str) -> tuple[int, dict[bytes, bytes], bytes]:
+def request(port: int, method: str, path: str, extra: str = "") -> tuple[int, dict[bytes, bytes], bytes]:
     with socket.create_connection(("127.0.0.1", port), 5) as peer:
         peer.settimeout(2)
         peer.sendall(
             f"{method} {path} HTTP/1.1\r\n"
             "Host: localhost\r\n"
-            "Connection: close\r\n\r\n".encode()
+            f"{extra}Connection: close\r\n\r\n".encode()
         )
         response = bytearray()
         while True:
@@ -97,7 +97,7 @@ def probe(port: int) -> None:
     assert status == 404 and b"Not Found" in body, (status, headers, body)
     assert_global(headers, b"4")
 
-    status, headers, body = request(port, "OPTIONS", "/missing")
+    status, headers, body = request(port, "OPTIONS", "/missing", "Origin: https://example.org\r\n")
     assert (status, body) == (204, b""), (status, headers, body)
     assert headers.get(b"x-preflight-policy") == b"handled", headers
     assert_global(headers, b"4")
@@ -120,13 +120,37 @@ def probe(port: int) -> None:
     assert headers.get(b"x-global-policy") == b"executed", headers
     assert b"x-execution-order" not in headers, headers
 
+    role = "X-Probe-Role: admin\r\n"
+    path = "/api/admin/items/42"
+    cases = [
+        ("GET", "/api/public", "", 200, b"public", b"G"),
+        ("GET", path, "", 403, b"role required", b"GAD/A"),
+        ("GET", path + "?v=1", role, 200, b"item:42", b"GABRH/R/B/A"),
+        ("GET", "/api/admin/items/fixed", role, 200, b"item:fixed", b"GABRH/R/B/A"),
+        ("POST", path, role, 200, b"item:42", b"GABH/B/A"),
+        ("OPTIONS", path, role, 200, b"item:42", b"GABH/B/A"),
+        ("DELETE", path, role, 404, None, b"G"),
+        ("GET", "/api/admin/missing", "", 404, None, b"G"),
+        ("OPTIONS", "/api/missing", "", 404, None, b"G"),
+        ("GET", "/api/admin/error", role, 418, b"handled", b"GABE"),
+    ]
+    for method, target, extra, expected, payload, trace in cases:
+        status, headers, body = request(port, method, target, extra)
+        assert (status, headers.get(b"x-scopes")) == (expected, trace), (target, status, headers, body)
+        assert body == payload if payload is not None else b"Not Found" in body
+        assert headers.get(b"x-local-id") == (payload.removeprefix(b"item:") if trace == b"GABRH/R/B/A" else None)
+    status, headers, body = request(port, "OPTIONS", path, "Origin: https://example.org\r\n")
+    assert (status, body, headers.get(b"x-preflight-policy")) == (204, b"", b"handled")
+    assert b"x-scopes" not in headers  # Earlier global short-circuit.
+
 
 if __name__ == "__main__":
     binary = str(Path(sys.argv[1]).resolve())
     try:
-        with server(binary) as port:
-            probe(port)
-        print("PASS global middleware socket contract", flush=True)
+        for workers in (1, 2):
+            with server(binary, workers) as port:
+                probe(port)
+            print(f"PASS middleware socket contract (18 cases, workers={workers})", flush=True)
     except (AssertionError, OSError) as error:
-        print(f"FAIL global middleware socket contract: {error!r}", flush=True)
+        print(f"FAIL middleware socket contract: {error!r}", flush=True)
         sys.exit(1)

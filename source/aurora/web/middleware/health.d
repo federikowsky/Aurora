@@ -57,8 +57,7 @@ import aurora.web.context;
 import aurora.runtime.server : Server;
 
 // Import middleware types without causing circular dependency
-alias NextFunction = void delegate();
-alias Middleware = void delegate(ref Context ctx, NextFunction next);
+public import aurora.web.middleware.chain : Middleware, NextFunction;
 
 /**
  * Result of a single health check.
@@ -202,7 +201,7 @@ class HealthMiddleware
      * Intercepts health probe paths and returns appropriate responses.
      * Non-health requests are passed to the next middleware.
      */
-    void handle(ref Context ctx, NextFunction next)
+    void handle(ref Context ctx, scope NextFunction next)
     {
         if (ctx.request is null)
         {

@@ -12,7 +12,7 @@
  */
 module aurora.web.middleware.ratelimit;
 
-import aurora.web.middleware;
+import aurora.web.middleware.chain : NextFunction, Middleware;
 import aurora.web.context;
 import aurora.http;
 import core.time;
@@ -320,7 +320,7 @@ class RateLimitMiddleware
     /**
      * Handle request
      */
-    void handle(Context ctx, NextFunction next)
+    void handle(Context ctx, scope NextFunction next)
     {
         // Extract key for rate limiting
         string key = extractKey(ctx);
@@ -398,7 +398,7 @@ Middleware rateLimitMiddleware(RateLimitConfig config = RateLimitConfig())
 {
     auto limiter = new RateLimitMiddleware(config);
     
-    return (ref Context ctx, NextFunction next) {
+    return (ref Context ctx, scope NextFunction next) {
         limiter.handle(ctx, next);
     };
 }

@@ -19,7 +19,7 @@
  */
 module aurora.web.middleware.security;
 
-import aurora.web.middleware;
+import aurora.web.middleware.chain : NextFunction, Middleware;
 import aurora.web.context;
 import aurora.http;
 
@@ -97,7 +97,7 @@ class SecurityMiddleware
     /**
      * Handle request (middleware interface)
      */
-    void handle(Context ctx, NextFunction next)
+    void handle(Context ctx, scope NextFunction next)
     {
         // Add security headers before calling next
         addSecurityHeaders(ctx);
@@ -212,7 +212,7 @@ Middleware securityHeadersMiddleware(SecurityConfig config = SecurityConfig())
 {
     auto security = new SecurityMiddleware(config);
     
-    return (ref Context ctx, NextFunction next) {
+    return (ref Context ctx, scope NextFunction next) {
         security.handle(ctx, next);
     };
 }

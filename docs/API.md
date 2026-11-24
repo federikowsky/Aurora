@@ -42,9 +42,24 @@ parameter. The by-value form mutated a copy and could not emit a response.
 
 ## Middleware and policies
 
-[MiddlewarePipeline](../source/aurora/web/middleware/package.d) executes middleware registered with `App.use` in registration order around every request admitted to App dispatch. Parser/framing failures and admission rejections happen before this boundary. Routing runs first, so matched parameters are visible to middleware; the pipeline then wraps either the selected handler or Aurora's 404 fallback. This includes an otherwise unmatched `OPTIONS` request. Omitting `next()` short-circuits dispatch; code after `next()` unwinds in reverse order. An uncaught middleware or handler exception leaves the chain and is handled by the App exception boundary, so post-`next()` code above the throw does not run.
+[App.use](../source/aurora/app.d) wraps the matched handler or Aurora's 404 fallback after a single method/path match. Matched parameters are already available to global and local middleware. Parser/framing failures and admission rejections precede App dispatch. A global middleware, including CORS, may finish an admitted request without running the endpoint; this also works for unmatched `OPTIONS`.
 
-`Router.use` and the public `Router.middlewares` array were removed because they stored policy without ever executing it. Code that intended application-wide policy must move registration to `App.use`. That migration deliberately broadens execution to misses and unmatched preflight requests. Aurora does not currently promise implicit route/group/subrouter inheritance; use explicit handler composition when a policy is narrower than the application until a smaller, evidence-backed public primitive is established.
+For a policy shared by a set of endpoints, pass the middleware when constructing their router. For just one endpoint, use [withMiddleware](../source/aurora/web/middleware/chain.d). Both accept the same middleware delegates as the App pipeline. A [complete working example](../examples/middleware_example.d) uses a public health check, authenticated reads and writer-only updates:
+
+```d
+auto reports = new Router("/reports", identify);
+reports.get("/:id", read);
+reports.put("/:id", withMiddleware(update, requireWriter));
+app.includeRouter(reports);
+```
+
+- Incoming order is App registration order, outer to inner routers, route policies left to right, then handler. Returning unwinds in reverse. The same instance explicitly registered twice executes twice; distinct groups may deliberately share a stateful limiter. The application owns synchronization of mutable state across workers.
+- `next()` is borrowed, synchronous and optional. Call it at most once in the current invocation; a second attempt throws before re-entering downstream code, even if the first threw. Do not save it or schedule it. A middleware can catch downstream exceptions; otherwise they reach the existing App exception boundary. Use `scope(exit)` for unconditional cleanup; ordinary code after `next()` is skipped on exceptions.
+- A miss (including wrong method) has no local policy. A registered `OPTIONS` leaf gets its own local policy if the App chain allows it; an unmatched `OPTIONS` gets only the global chain and fallback. Group policy protects actual endpoints, not all unknown URLs under their prefix.
+- Configure before serving. The constructor and `withMiddleware` copy policy membership once. `parent.includeRouter(child)` snapshots the child's current effective endpoints under the parent prefix. `parent.mount("/v1", child)` additionally inserts `/v1` **before** the child's paths; the source is never mutated or retained as a router. Later child additions require another non-conflicting mount. No live registration or concurrent reconfiguration is supported. Verb helpers apply the router prefix; the legacy generic `addRoute(method, path, handler)` takes a complete path in that router's own tree.
+- Duplicate method/pattern and inconsistent capture names on the same parameter/wildcard node are configuration errors. A conflicting mount is rejected before any endpoint is imported. Static, parameter and wildcard alternatives can coexist. A static prefix with no handler is not a match.
+
+**Migration:** keep cross-cutting policy on `App.use`. Do not restore the former inert `Router.use` or mutate a middleware array. Replace writes to `prefix` and traversal of `subRouters` with explicit construction and mounting; the internal recursion arguments to `includeRouter` are gone. Replace deliberate last-wins route overrides with one explicit handler. Annotate named middleware/class continuations `scope NextFunction next`; move asynchronous work onto independently owned data, outside the continuation. Stateful class policies can expose a compatible `Middleware` delegate (e.g. `bulkhead.middleware()`).
 
 Rate limiting, CORS, security headers, tracing, health, circuit-breaker, bulkhead and other modules exist; this is not a claim that their complete network/concurrency semantics are verified. Health/load-shedding helpers requiring Server do not automatically compose through App's private Server. Authentication/authorization samples are application examples, not a built-in audited security system.
 
