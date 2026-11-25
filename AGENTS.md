@@ -12,6 +12,8 @@ Code, manifests and executable tests are authoritative for implementation. Docum
 
 Start from the user journey and the observed problem. Prefer small orthogonal primitives, explicit semantics, inspectable behavior and progressively available control. Minimize both exposed complexity and necessary internal machinery. Do not create subsystem boxes, policies or hooks because the North Star mentions them. Do not impose a typed endpoint API, compile-time routing or a runtime rewrite without comparative evidence.
 
+For a public API change, compare representative calling code before and after against the [public API acceptance requirement](docs/NORTH_STAR.md#surface-semantics-and-machinery). Include the ordinary case when a change serves advanced usage.
+
 Reevaluate priorities after material findings. Close correctness and memory-safety defects in their owning component; do not follow a historical TODO sequence. Explore credible alternatives, including eliminating the mechanism. Use D, Phobos, runtime, OS and established libraries before substantial custom code. Preserve useful working choices when no better choice is demonstrated.
 
 Aurora, Wire, FastjsonD and Aurora-WebSocket are the first-party ecosystem. The latter three are permanent strategic dependencies, with evolvable internals/APIs; repair their responsibilities in their repositories. Other dependencies are tools to evaluate, not permanent constraints.

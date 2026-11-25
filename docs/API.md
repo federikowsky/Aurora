@@ -4,7 +4,7 @@ This is a curated contract guide, not a duplicate signature catalog. Follow the 
 
 ## Defining endpoints
 
-[App](../source/aurora/app.d) exposes `get`, `post`, `put`, `delete_`, `patch`, `route`, `includeRouter`, `use`, hooks, exception registration and lifecycle methods. Current handlers use `ref Context`; automatic binding to a domain-typed handler is not implemented.
+Register an endpoint on [App](../source/aurora/app.d) with its HTTP verb, path and handler. Handlers receive `ref Context`:
 
 ```d
 app.get("/users/:id", (ref Context ctx) {
@@ -14,7 +14,7 @@ app.get("/users/:id", (ref Context ctx) {
 
 [Router](../source/aurora/web/router.d) selects by method and path, with static before parameter before wildcard matching and backtracking. Four path parameters fit inline; overflow can allocate. `normalizePath` is not a complete URI canonicalizer. Percent-encoding, dot segments, Unicode and concurrent registration have no comprehensive verified contract. Register routes before serving; do not infer safe concurrent mutation.
 
-`App.group`, a `listen(port, callback)` overload and an input getter `ctx.json` advertised in old prose are not the current API. Use source/examples instead of adapting old snippets by guesswork.
+For endpoints with a shared prefix or policy, use [a group](#middleware-and-policies). To start serving, call `app.listen(port)`; register a startup callback separately with `app.onStart(hook)` if needed. Automatic binding to a domain-typed handler is not implemented.
 
 ## Request data and lifetime
 
@@ -42,23 +42,34 @@ parameter. The by-value form mutated a copy and could not emit a response.
 
 ## Middleware and policies
 
-[App.use](../source/aurora/app.d) wraps the matched handler or Aurora's 404 fallback after a single method/path match. Matched parameters are already available to global and local middleware. Parser/framing failures and admission rejections precede App dispatch. A global middleware, including CORS, may finish an admitted request without running the endpoint; this also works for unmatched `OPTIONS`.
-
-Put shared policy on a group and a rule for one operation immediately before its handler. In this [working example](../examples/middleware_example.d), both operations identify the caller; only the update requires a writer. Here `read` and `update` stand for the application's handler delegates:
+Declare a policy where it applies. In this [working example](../examples/middleware_example.d), every admitted request gets a request ID. Health is public; reading a report requires identification, and changing it also requires write permission. `health`, `read` and `update` below stand for application handlers.
 
 ```d
+app.use(requestIdMiddleware());
+app.get("/health", health);
+
 app.group("/reports", identify, (reports) {
     reports.get("/:id", read);
     reports.put("/:id", requireWriter, update);
 });
 ```
 
-- Incoming order is App registration order, outer to inner routers, route policies left to right, then handler. Returning unwinds in reverse. The same instance explicitly registered twice executes twice; distinct groups may deliberately share a stateful limiter. The application owns synchronization of mutable state across workers.
-- `next()` is borrowed, synchronous and optional. Call it at most once in the current invocation; a second attempt throws before re-entering downstream code, even if the first threw. Do not save it or schedule it. A middleware can catch downstream exceptions; otherwise they reach the existing App exception boundary. Use `scope(exit)` for unconditional cleanup; ordinary code after `next()` is skipped on exceptions.
-- A miss (including wrong method) has no local policy. A registered `OPTIONS` leaf gets its own local policy if the App chain allows it; an unmatched `OPTIONS` gets only the global chain and fallback. Group policy protects actual endpoints, not all unknown URLs under their prefix.
-- The same registration forms work on App and Router: `put(path, handler)`, `put(path, policy, handler)`, or `put(path, [first, second], handler)`. Other verbs and explicit methods (`App.route`, `Router.addRoute`) follow the same order. A group similarly takes a definition block, optionally preceded by a policy or list. Paths inside that block are local, including custom methods: `reports.addRoute("OPTIONS", "/:id", handler)` resolves to `/reports/:id` above. Groups nest; the block runs once during configuration and `group` returns no routing handle. Only a successfully completed, non-conflicting set of endpoints is attached. An exception does not roll back unrelated application side effects.
-- Configure before serving. Policy membership is copied at registration. For an independently built module, keep `new Router(prefix, policies...)` and `parent.includeRouter(child)`; for a reusable handler value, [withMiddleware](../source/aurora/web/middleware/chain.d) remains available. Including a router snapshots its current endpoints. `parent.mount("/v1", child)` inserts `/v1` before the child's paths, without mutating or retaining the source. Later child changes are not retroactive. No live or concurrent reconfiguration is supported. Outside an inline group the legacy `addRoute` still takes a complete path in its own router; verb helpers apply its prefix.
-- Duplicate method/pattern and inconsistent capture names on the same parameter/wildcard node are configuration errors. A conflicting mount is rejected before any endpoint is imported. Static, parameter and wildcard alternatives can coexist. A static prefix with no handler is not a match.
+Leave out the policy when none is needed. For several policies on the same group or route, pass them as one list in execution order, for example `[identify, requireWriter]`.
+
+### Dispatch and registration contract
+
+- After a single method/path match, App middleware wraps the selected handler or the framework 404. Matched parameters are available even to global middleware. Parser/framing failures and admission rejections precede App dispatch.
+- Incoming order is App registration order, outer to inner groups, route policies left to right, then handler. Returning unwinds in reverse. The same instance explicitly registered twice executes twice; distinct groups may share a stateful limiter. The application owns synchronization of mutable state across workers.
+- `next()` is borrowed, synchronous and optional. Call it at most once per invocation; a second attempt throws even if the first threw. Do not save or schedule it. Middleware can catch downstream exceptions; otherwise they reach the App exception boundary. Use `scope(exit)` for unconditional cleanup.
+- A miss, including a wrong method, runs no local policy. A registered `OPTIONS` gets its own route policies if the global chain continues. Unmatched `OPTIONS` goes through the global chain and fallback; a global policy such as CORS can respond first. Unknown URLs under a group prefix are still misses.
+- Configure before serving. Policy membership is copied at registration. Group paths are local, including custom methods (`reports.addRoute("OPTIONS", "/:id", handler)`). Groups nest, run their definition block once and return no routing handle. Routes attach only if the definition finishes and the mount has no conflicts; external application side effects are not rolled back.
+- Duplicate method/pattern and inconsistent capture names on the same parameter/wildcard node are configuration errors. Static, parameter and wildcard alternatives can coexist. A static prefix with no handler is not a match.
+
+### Independently built routers and reusable handlers
+
+When another module supplies a `Router`, attach it with `includeRouter(child)` or use `parent.mount("/v1", child)` on a Router to add a mount prefix. This snapshots the child's routes without retaining it; later changes do not propagate. A separately constructed `new Router(prefix, policies...)` accepts the same local policies. Its verb helpers add its prefix, whereas its low-level `addRoute` expects the full path in that router. No live or concurrent reconfiguration is supported.
+
+Use [withMiddleware](../source/aurora/web/middleware/chain.d) when the result must itself be a `Handler` value, for instance to pass it to another component. Ordinary endpoint registration already handles the composition.
 
 **Migration:** existing route calls and explicitly assembled modules remain valid. A verb name now denotes overloads: if you previously used `auto addPut = &router.put;`, write `void delegate(string, Handler) addPut = &router.put;` (on App the return type is `App`). Keep cross-cutting policy on `App.use`. Do not restore the former inert `Router.use` or mutate a middleware array. Replace writes to `prefix` and traversal of `subRouters` with explicit construction and mounting; the internal recursion arguments to `includeRouter` are gone. Replace deliberate last-wins route overrides with one explicit handler. Annotate named middleware/class continuations `scope NextFunction next`; move asynchronous work onto independently owned data, outside the continuation. Stateful class policies can expose a compatible `Middleware` delegate (e.g. `bulkhead.middleware()`).
 

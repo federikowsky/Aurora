@@ -1,6 +1,6 @@
 # Aurora North Star
 
-Normative product direction, consolidated from the owner's mandates of 27 September and 4 October 2026. This is the repository source of truth for architectural decision criteria, not a feature roadmap. Current user instructions and actual access controls retain precedence. Operational instructions live in [AGENTS.md](../AGENTS.md); implementation state lives in [ENGINEERING_STATUS.md](ENGINEERING_STATUS.md).
+Normative product direction, consolidated from the owner’s mandates of 27 September, 4 October and 25 November 2026. This is the repository source of truth for architectural decision criteria, not a feature roadmap. Current user instructions and actual access controls retain precedence. Operational instructions live in [AGENTS.md](../AGENTS.md); implementation state lives in [ENGINEERING_STATUS.md](ENGINEERING_STATUS.md).
 
 ## The outcome
 
@@ -14,13 +14,13 @@ These are simultaneous quality dimensions, not an ordered feature list. No aggre
 
 **Simple surface. Powerful core. Minimal machinery. Explicit semantics. Progressive control. Pay only for what you use.**
 
-Developer experience is architectural. Minimize the framework knowledge required to build correct, high-performance applications. Common paths should express domain logic; automate mechanical, predictable plumbing. A typed endpoint returning a domain value is a design possibility, not a requirement to implement now.
+**Public API clarity is an acceptance requirement.** For each common task, give the caller one obvious way to express the intent. Keep predictable setup and wiring inside Aurora; keep choices that affect behavior, such as which operation requires permission, visible where they apply. Judge a proposed name, overload or configuration step from real calling code: it must serve a distinct need or replace a more cumbersome path. If the caller still faces avoidable choices or framework plumbing, redesign before merging, even when tests and benchmarks pass.
 
 **Explicit semantics, implicit plumbing:** automated behavior must remain deterministic, understandable and inspectable. Users must be able to discover where values came from, what decoding/normalization/validation occurred, why a route or handler was selected, what policy/middleware acted, why input was rejected, how the response was produced and where to change behavior. Convenience must not conceal silent coercion, errors, ownership or lifetime.
 
 Prefer small orthogonal primitives and strong composition over large option/hook surfaces. Offer progressively available control: convenient API, configuration/policy, replacement or extension, direct capability APIs and low-level HTTP/runtime access where useful. These are user needs, not a mandate for five implementation layers. An advanced case must not require abandoning the framework or burden every common case.
 
-Discover cohesive subsystem boundaries from real journeys and responsibilities—endpoint definition, input processing, authorization, domain work, output, errors, diagnosis. Do not start by building named boxes. Binding, decoding, normalization, coercion and validation may or may not belong together; evidence and the simplest complete model decide. Every abstraction, engine, hook and policy must earn its cost.
+Discover cohesive subsystem boundaries from real journeys and responsibilities—endpoint definition, input processing, authorization, domain work, output, errors, diagnosis. Do not start by building named boxes. A typed endpoint returning a domain value is a design possibility, not a requirement. Binding, decoding, normalization, coercion and validation may or may not belong together; evidence and the simplest complete model decide. Every abstraction, engine, hook and policy must earn its cost.
 
 Use static knowledge and compile-time work when they improve type safety and eliminate runtime discovery or repeated work. Count compilation time, binary size, specialization bloat, diagnostics and maintenance as costs too. Optional features should impose zero or negligible measured cost when unused; their presence in the distribution must not silently enlarge the minimal request path.
 
