@@ -133,6 +133,7 @@ def probe(port: int) -> None:
         ("GET", "/api/admin/missing", "", 404, None, b"G"),
         ("OPTIONS", "/api/missing", "", 404, None, b"G"),
         ("GET", "/api/admin/error", role, 418, b"handled", b"GABE"),
+        ("PATCH", "/direct/7", "", 200, b"item:7", b"GPH/P"),
     ]
     for method, target, extra, expected, payload, trace in cases:
         status, headers, body = request(port, method, target, extra)
@@ -150,7 +151,7 @@ if __name__ == "__main__":
         for workers in (1, 2):
             with server(binary, workers) as port:
                 probe(port)
-            print(f"PASS middleware socket contract (18 cases, workers={workers})", flush=True)
+            print(f"PASS middleware socket contract (19 cases, workers={workers})", flush=True)
     except (AssertionError, OSError) as error:
         print(f"FAIL middleware socket contract: {error!r}", flush=True)
         sys.exit(1)

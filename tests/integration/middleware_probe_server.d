@@ -75,7 +75,6 @@ void main(string[] args)
         scope(exit) ctx.header("X-Scopes", ctx.storage.get!Trace("trace").value);
         next();
     });
-    auto area = new Router("/api", mark("A"));
     WebMiddleware.Middleware requireRole = (ref Context ctx, scope WebMiddleware.NextFunction next) {
         if (ctx.request.getHeader("X-Probe-Role") != "admin") {
             ctx.storage.get!Trace("trace").value ~= "D";
@@ -84,7 +83,6 @@ void main(string[] args)
         }
         next();
     };
-    auto admin = new Router("/admin", requireRole, mark("B"));
     void endpoint(ref Context ctx) {
         ctx.storage.get!Trace("trace").value ~= "H";
         ctx.send("item:" ~ ctx.params["id"]);
@@ -93,13 +91,16 @@ void main(string[] args)
         ctx.header("X-Local-Id", ctx.params["id"]);
         next();
     };
-    admin.get("/items/:id", WebMiddleware.withMiddleware(&endpoint, mark("R"), inspectId));
-    admin.post("/items/:id", &endpoint);
-    admin.get("/items/fixed/detail", (ref Context ctx) { ctx.send("fixed detail"); });
-    admin.addRoute("OPTIONS", "/admin/items/:id", &endpoint);
-    admin.get("/error", WebMiddleware.withMiddleware((ref Context ctx) { throw new ProbeError; }, mark("E")));
-    area.includeRouter(admin);
-    app.includeRouter(area);
+    app.group("/api", mark("A"), (area) {
+        area.group("/admin", [requireRole, mark("B")], (admin) {
+            admin.get("/items/:id", [mark("R"), inspectId], &endpoint);
+            admin.post("/items/:id", &endpoint);
+            admin.get("/items/fixed/detail", (ref Context ctx) { ctx.send("fixed detail"); });
+            admin.addRoute("OPTIONS", "/items/:id", &endpoint);
+            admin.get("/error", mark("E"), (ref Context ctx) { throw new ProbeError; });
+        });
+    });
+    app.route("PATCH", "/direct/:id", mark("P"), &endpoint);
     app.get("/api/public", (ref Context ctx) { ctx.send("public"); });
 
     app.get("/ok", (ref Context ctx) {

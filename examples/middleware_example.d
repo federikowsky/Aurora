@@ -40,13 +40,12 @@ void main()
     auto config = ServerConfig.defaults();
     config.host = "127.0.0.1";
     auto app = new App(config);
-    app.use((new RequestIdMiddleware).middleware);
+    app.use(requestIdMiddleware());
     app.get("/health", (ref Context ctx) { ctx.send("ok"); });
 
-    auto reports = new Router("/reports", identify);
-    reports.get("/:id", (ref Context ctx) { ctx.send(ctx.params["id"]); });
-    void update(ref Context ctx) { ctx.status(204); }
-    reports.put("/:id", withMiddleware(&update, requireWriter));
-    app.includeRouter(reports);
+    app.group("/reports", identify, (reports) {
+        reports.get("/:id", (ref Context ctx) { ctx.send(ctx.params["id"]); });
+        reports.put("/:id", requireWriter, (ref Context ctx) { ctx.status(204); });
+    });
     app.listen(8080);
 }

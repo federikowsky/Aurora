@@ -467,3 +467,64 @@ unittest
     dest.includeRouter(dest).shouldThrow!Exception;
     dest.includeRouter(null).shouldThrow!Exception;
 }
+
+@("inline groups publish only their completed definition; policy lists are snapshots")
+unittest
+{
+    import aurora.web.middleware : Middleware, NextFunction;
+    auto root = new Router;
+    string trace;
+    Middleware mark(string name) {
+        return (ref Context ctx, scope NextFunction next) { trace ~= name; next(); };
+    }
+    void leaf(ref Context ctx) { trace ~= "!"; }
+    Middleware[] selected = [mark("a"), mark("b")];
+    root.group("/v1", selected, (outer) {
+        outer.group("/tool", (inner) {
+            inner.put("/item", selected, &leaf);
+            inner.addRoute("OPTIONS", "/item", selected, &leaf);
+        });
+        root.match("PUT", "/v1/tool/item").found.shouldBeFalse;
+    });
+    selected[0] = mark("changed");
+    Context ctx;
+    root.match("PUT", "/v1/tool/item").handler(ctx);
+    trace.shouldEqual("abab!");
+    root.match("OPTIONS", "/v1/tool/item").found.shouldBeTrue;
+    root.match("OPTIONS", "/v1/item").found.shouldBeFalse;
+    root.match("OPTIONS", "/item").found.shouldBeFalse;
+    void interrupted(Router child) {
+        child.get("/early", &leaf);
+        throw new Exception("definition interrupted");
+    }
+    root.group("/interrupted", &interrupted).shouldThrow!Exception;
+    root.match("GET", "/interrupted/early").found.shouldBeFalse;
+    root.get("/bad", cast(Middleware)null, &leaf).shouldThrow!Exception;
+    root.match("GET", "/bad").found.shouldBeFalse;
+    static assert(!__traits(compiles, root.put("/bad", &leaf, mark("wrong order"))));
+    static assert(!__traits(compiles, root.put("/bad", null, &leaf)));
+    static assert(!__traits(compiles, root.group("/bad", &interrupted).get("/outside", &leaf)));
+}
+
+@("a saved verb and a decorated verb still call the ordinary virtual registration")
+unittest
+{
+    import aurora.web.middleware : Middleware, NextFunction;
+    class RecordingRouter : Router {
+        size_t registrations;
+        override void put(string path, Handler handler) {
+            ++registrations;
+            super.put(path, handler);
+        }
+    }
+    auto concrete = new RecordingRouter;
+    Router router = concrete;
+    void delegate(string, Handler) addPut = &router.put;
+    Handler handler = (ref Context ctx) {};
+    Middleware allow = (ref Context ctx, scope NextFunction next) { next(); };
+    addPut("/plain", handler);
+    router.put("/protected", allow, handler);
+    concrete.registrations.shouldEqual(2);
+    router.match("PUT", "/plain").handler.shouldEqual(handler);
+    router.match("PUT", "/protected").found.shouldBeTrue;
+}
