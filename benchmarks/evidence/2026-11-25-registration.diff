@@ -1,0 +1,65 @@
+--- policy_cost.d
++++ registration_cost.d
+@@ -3 +3 @@
+-    name "aurora_policy_cost"
++    name "aurora_registration_cost"
+@@ -12 +12 @@
+-module benchmarks.policy_cost;
++module benchmarks.registration_cost;
+@@ -62 +61,0 @@
+-    Router area;
+@@ -64,2 +63 @@
+-        static if (__traits(hasMember, mw, "withMiddleware")) {
+-            area = new Router("/items", g);
++        root.group("/items", g, (area) {
+@@ -67 +65 @@
+-            area.get("/:id", mw.withMiddleware(h, r));
++            area.get("/:id", r, h);
+@@ -69 +67 @@
+-        } else throw new Exception("bound mode requires scoped middleware");
++        });
+@@ -71,4 +69,5 @@
+-        area = new Router("/items");
+-        area.get("/", manualWrap(h, g));
+-        area.get("/:id", manualWrap(manualWrap(h, r), g));
+-        foreach (path; extra) area.get(path, manualWrap(h, g));
++        auto area = new Router("/items", g);
++        area.get("/", h);
++        area.get("/:id", mw.withMiddleware(h, r));
++        foreach (path; extra) area.get(path, h);
++        root.includeRouter(area);
+@@ -76 +74,0 @@
+-    root.includeRouter(area);
+@@ -96,3 +94,3 @@
+-    if (args.length < 2 || (args[1] != "manual" && args[1] != "bound"))
+-        throw new Exception("expected manual or bound");
+-    bool bound = args[1] == "bound";
++    if (args.length < 2 || (args[1] != "explicit" && args[1] != "inline"))
++        throw new Exception("expected explicit or inline");
++    bool bound = args[1] == "inline";
+@@ -160,25 +157,0 @@
+-    // Isolate continuation cost from parser, header maps and response creation.
+-    mw.Middleware counter = (ref Context c, scope mw.NextFunction next) {
+-        c.storage.set("calls", c.storage.get!int("calls") + 1);
+-        next();
+-    };
+-    Handler finalHandler = (ref Context c) { c.responseSent = true; };
+-    foreach (depth; [0, 1, 3]) {
+-        Handler h = finalHandler;
+-        if (bound) {
+-            static if (__traits(hasMember, mw, "withMiddleware")) {
+-                mw.Middleware[] policies;
+-                foreach (_; 0 .. depth) policies ~= counter;
+-                h = mw.withMiddleware(h, policies);
+-            }
+-        } else {
+-            foreach (_; 0 .. depth) h = manualWrap(h, counter);
+-        }
+-        measure("chain" ~ depth.to!string, n, n / 10, (size_t i) {
+-            Context c;
+-            h(c);
+-            if (!c.responseSent || c.storage.get!int("calls") != depth)
+-                throw new Exception("incorrect continuation count");
+-        });
+-    }
+-
