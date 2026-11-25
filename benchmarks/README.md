@@ -66,3 +66,17 @@ python3 benchmarks/compare_policy.py /path/base/benchmarks/aurora_policy_cost /p
 ```
 
 Pin disjoint CPU sets where available (e.g. `taskset -c 2-4 python3 ... --server-cpus 1`). A1/A2 run the same baseline binary and manual registration; M uses the candidate with the same manual registration; B uses group and route binding. The component parses identical input, matches routes, validates status, headers and body. Isolated chain rows use request-local integer storage without networking; setup includes 128 extra routes and import. D-GC bytes are from the measured thread, after warm-up and an explicit collection with automatic GC enabled. TCP uses a single worker and four persistent connections in a closed loop. Every response and graceful process exit is checked. Output contains individual component samples, latency observations, configuration and summary rows. Raw loopback time includes the client; do not turn noisy A/A differences into a throughput claim.
+
+### Inline registration
+
+To compare the public declarations in the same executable, apply the [registration fixture diff](evidence/2026-11-25-registration.diff) to a copy of `policy_cost.d`. Both paths use the same policies, endpoints, parser, response checks, executor and GC settings: `explicit` uses a standalone router, a composed handler and explicit inclusion; `inline` uses a group block and policies on the verb. Run from the repository root:
+
+```sh
+patch -o benchmarks/registration_cost.d benchmarks/policy_cost.d < benchmarks/evidence/2026-11-25-registration.diff
+dub build benchmarks/registration_cost.d --single --compiler=ldc2 --build=release
+for order in 'explicit inline' 'inline explicit' 'explicit inline' 'inline explicit' 'explicit inline' 'inline explicit'; do
+  for mode in $order; do taskset -c 1 ./benchmarks/aurora_registration_cost "$mode" 60000 || exit 1; done
+done
+```
+
+[All 96 rows](evidence/2026-11-25-registration.csv) are from six pairs on Linux 6.18.57 x86-64, AMD EPYC 9V74, affinity 0–8, LDC 1.42.0, DUB 1.41.0, release (`-O2 -release -enable-inlining`), one process and one measured thread on CPU 1, no socket or logging. CPU quota and physical isolation unverified. Each normal row has 6,000 warm-up and 60,000 checked operations. Setup has 3 warm-up and 20 measured constructions, each with 128 extra routes. D-GC accounting excludes native and stack memory. This comparison is not an HTTP throughput or tail-latency result.

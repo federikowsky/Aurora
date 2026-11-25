@@ -112,6 +112,15 @@ class App
         return this;
     }
     
+    private void mountGroup(string prefix, Router child) { router.mount(prefix, child); }
+    mixin PolicyRegistration!mountGroup;
+    alias get = beforeHandler!(get, string);
+    alias post = beforeHandler!(post, string);
+    alias put = beforeHandler!(put, string);
+    alias delete_ = beforeHandler!(delete_, string);
+    alias patch = beforeHandler!(patch, string);
+    alias route = beforeHandler!(route, string, string);
+
     /// Include sub-router
     App includeRouter(Router subRouter)
     {

@@ -12,7 +12,7 @@
 module aurora.web.router;
 
 import aurora.web.context;
-import aurora.web.middleware.chain : Middleware, bindPolicy, snapshotPolicy;
+import aurora.web.middleware.chain : Middleware, bindPolicy, snapshotPolicy, withMiddleware;
 import std.functional : toDelegate;
 
 /**
@@ -175,6 +175,54 @@ struct Match
  */
 alias Handler = void delegate(ref Context);
 
+// Shared registration syntax for App and Router. Keep the ordinary verb overload
+// as the owner of the path, return value and virtual dispatch.
+package(aurora) mixin template PolicyRegistration(alias attachGroup)
+{
+    private template beforeHandler(alias register, Location...)
+    {
+        auto beforeHandler(Location location, Middleware policy, Handler handler)
+        {
+            return register(location, withMiddleware(handler, policy));
+        }
+
+        auto beforeHandler(Location location, Middleware[] policies, Handler handler)
+        {
+            return register(location, withMiddleware(handler, policies));
+        }
+    }
+
+    private alias DefineRoutes = void delegate(Router);
+
+    /// Define a child inline. Import its routes only if the whole definition succeeds.
+    final void group(string prefix, scope DefineRoutes define)
+    {
+        defineGroup(prefix, define);
+    }
+
+    /// ditto
+    final void group(string prefix, Middleware policy, scope DefineRoutes define)
+    {
+        defineGroup(prefix, define, policy);
+    }
+
+    /// ditto
+    final void group(string prefix, Middleware[] policies, scope DefineRoutes define)
+    {
+        defineGroup(prefix, define, policies);
+    }
+
+    private void defineGroup(string prefix, scope DefineRoutes define, Middleware[] policies...)
+    {
+        if (define is null) throw new Exception("A group requires a route definition");
+        // All registrations in the block are local, including addRoute for
+        // custom methods. Apply the prefix once, at the mount boundary.
+        auto child = new Router("", policies);
+        define(child);
+        attachGroup(prefix, child);
+    }
+}
+
 /**
  * Router - Radix tree router
  *
@@ -275,6 +323,14 @@ class Router
         addRoute("PATCH", prefixed(path), handler);
     }
     
+    mixin PolicyRegistration!mount;
+    alias get = beforeHandler!(get, string);
+    alias post = beforeHandler!(post, string);
+    alias put = beforeHandler!(put, string);
+    alias delete_ = beforeHandler!(delete_, string);
+    alias patch = beforeHandler!(patch, string);
+    alias addRoute = beforeHandler!(addRoute, string, string);
+
     /**
      * Auto-register handlers from a module using UDA decorators
      * 

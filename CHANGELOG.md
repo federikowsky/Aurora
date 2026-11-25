@@ -1,8 +1,8 @@
 # Change history
 
-## Unreleased — updated 24 November 2026
+## Unreleased — updated 25 November 2026
 
-- Bind group policy with `new Router(prefix, policies...)` and a single endpoint with `withMiddleware(handler, policies...)`. No extra match or hierarchy walk during requests. Keep App middleware on fallback/OPTIONS. Mount snapshots the child's effective routes without changing its prefix, and an incomplete static branch permits a parameter match. **Breaking configuration/continuation changes:** duplicate routes and conflicting capture names now throw at setup; router prefixes are read-only, the exposed child graph is removed, and `next` is synchronous, scoped and single-use. [Migration and ordering](docs/API.md#middleware-and-policies).
+- Declare related routes in `group(prefix, policy, define)` and register a method-specific rule as `put(path, policy, handler)`. Plain routes still take just path and handler. Standalone routers and precomposed handlers remain supported; stored verb references require an explicit delegate type. No extra match or hierarchy walk during requests. Keep App middleware on fallback/OPTIONS. Mount snapshots the child's effective routes without changing its prefix, and an incomplete static branch permits a parameter match. **Breaking configuration/continuation changes:** duplicate routes and conflicting capture names now throw at setup; router prefixes are read-only, the exposed child graph is removed, and `next` is synchronous, scoped and single-use. [Migration and ordering](docs/API.md#middleware-and-policies).
 
 - Make `App.use` middleware wrap every request admitted to App dispatch, including the 404 fallback and unmatched `OPTIONS`, while preserving matched route parameters and deterministic `next()` order. Parser/framing failures and admission rejections remain outside this boundary. Remove the inert `Router.use` / `Router.middlewares` surface; migrate application-wide registrations to `App.use`. Add debug/release socket coverage for match, miss, preflight, short-circuit, subrouter and exception behavior.
 
